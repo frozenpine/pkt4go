@@ -2,7 +2,6 @@ package pcap
 
 import (
 	"context"
-	"errors"
 	"io"
 	"log"
 	"net"
@@ -12,6 +11,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	libpcap "github.com/google/gopacket/pcap"
+	"github.com/pkg/errors"
 
 	"github.com/frozenpine/pkg4go"
 )
@@ -24,7 +24,7 @@ var (
 	dataSourcePattern = regexp.MustCompile(`^(?P<proto>pcap|file)://(?P<source>.*)$`)
 )
 
-func CreateHandler(dataSrc string) (*libpcap.Handle, error) {
+func CreateHandler(dataSrc string) (handle *libpcap.Handle, err error) {
 	srcMatch := dataSourcePattern.FindStringSubmatch(dataSrc)
 	if srcMatch == nil {
 		return nil, errors.New("invalid data source: " + dataSrc)
@@ -45,7 +45,7 @@ func CreateHandler(dataSrc string) (*libpcap.Handle, error) {
 	if ip, err := net.ResolveIPAddr("ip", source); err == nil {
 		ifaceList, err := libpcap.FindAllDevs()
 		if err != nil {
-			return nil, err
+			return nil, errors.WithStack(err)
 		}
 
 	FIND_IFACE:
@@ -61,17 +61,23 @@ func CreateHandler(dataSrc string) (*libpcap.Handle, error) {
 
 	switch proto {
 	case "pcap":
-		return libpcap.OpenLive(source, 65535, true, time.Hour)
+		if handle, err = libpcap.OpenLive(source, 65535, true, time.Hour); err != nil {
+			return nil, errors.WithStack(err)
+		}
 	case "file":
-		return libpcap.OpenOffline(source)
+		if handle, err = libpcap.OpenOffline(source); err != nil {
+			return nil, errors.WithStack(err)
+		}
 	default:
 		return nil, errors.New("unknown pcap protocol: " + proto)
 	}
+
+	return
 }
 
 func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, fn pkg4go.DataHandler) error {
 	if err := handler.SetBPFFilter(filter); err != nil {
-		return err
+		return errors.WithStack(err)
 	}
 
 	if ctx == nil {

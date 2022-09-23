@@ -12,11 +12,11 @@ package exanic
 
 #include <exanic/exanic.h>
 #include <exanic/fifo_rx.h>
+#include <exanic/filter.h>
 */
 import "C"
 import (
 	"context"
-	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -30,7 +30,6 @@ import (
 const (
 	defaultBufferLen    = 4096
 	defaultPkgBufferLen = 100
-	defaultBufferNum    = 0
 
 	PORT_KEY = "port"
 )
@@ -48,7 +47,7 @@ func CreateHandler(src string) (*Device, error) {
 	devData := strings.Split(src, ":")
 
 	if len(devData) != 2 {
-		return nil, errors.New("invalid device string")
+		return nil, errors.New("invalid device string: " + src)
 	}
 
 	var dev Device
@@ -56,16 +55,26 @@ func CreateHandler(src string) (*Device, error) {
 
 	dev.port, err = strconv.Atoi(devData[1])
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, errors.Wrap(err, "invalid port num")
 	}
 
-	dev.handler = C.exanic_acquire_handle(C.CString(src))
+	dev.handler = C.exanic_acquire_handle(C.CString(devData[0]))
 
 	if dev.handler == nil {
-		return nil, errors.New("acquire handler failed")
+		return nil, errors.New("acquire handler failed: " + devData[0])
 	}
 
 	return &dev, nil
+}
+
+func createFilter(input string) *C.exanic_ip_filter_t {
+	if input == "" {
+		return nil
+	}
+
+	var filter C.exanic_ip_filter_t
+
+	return &filter
 }
 
 type pkgData struct {
@@ -79,9 +88,21 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkg4go.Dat
 		ctx = context.Background()
 	}
 
-	rx := C.exanic_acquire_rx_buffer(dev.handler, C.int(dev.port), defaultBufferNum)
+	defer func() {
+		C.exanic_release_handle(dev.handler)
+	}()
+
+	rx := C.exanic_acquire_unused_filter_buffer(dev.handler, C.int(dev.port))
 	if rx == nil {
 		return errors.New("accquire rx buffer failed")
+	}
+	defer func() {
+		C.exanic_release_rx_buffer(rx)
+	}()
+
+	exaFilter := createFilter(filter)
+	if exaFilter != nil && C.exanic_filter_add_ip(dev.handler, rx, exaFilter) == -1 {
+		return errors.Errorf("create filter failed: %s", C.GoString(C.exanic_get_last_error()))
 	}
 
 	buffer := [defaultBufferLen]byte{}
@@ -90,17 +111,27 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkg4go.Dat
 	pkgCh := make(chan *pkgData, defaultPkgBufferLen)
 
 	go func() {
-		size := C.exanic_receive_frame(
-			rx,
-			(*C.char)(unsafe.Pointer(&buffer)),
-			C.size_t(defaultBufferLen),
-			&timestamp,
-		)
+		defer func() {
+			close(pkgCh)
+		}()
 
-		pkgCh <- &pkgData{
-			src:    nil,
-			dst:    nil,
-			buffer: buffer[:size],
+		for {
+			size := C.exanic_receive_frame(
+				rx,
+				(*C.char)(unsafe.Pointer(&buffer)),
+				C.size_t(defaultBufferLen),
+				&timestamp,
+			)
+
+			if size < 0 {
+				continue
+			}
+
+			pkgCh <- &pkgData{
+				src:    nil,
+				dst:    nil,
+				buffer: buffer[:size],
+			}
 		}
 	}()
 
@@ -113,7 +144,7 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkg4go.Dat
 				return nil
 			}
 
-			log.Printf("src[%s], dst[%s], %v", pkg.src, pkg.dst, pkg.buffer)
+			fn(pkg.src, pkg.dst, pkg.buffer)
 		}
 	}
 }

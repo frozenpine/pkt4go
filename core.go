@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 
@@ -18,8 +20,12 @@ var (
 	IPv4HeaderBaseSize = binary.Size(IPv4Header{})
 	TCPHeaderBaseSize  = binary.Size(TCPHeader{})
 	UDPHeaderSize      = binary.Size(UDPHeader{})
+)
 
-	ErrInsufficentData = origin_errors.New("insufficent data length")
+var (
+	ErrInsufficentData     = origin_errors.New("insufficent data length")
+	ErrUnpackOffset        = origin_errors.New("invalid unpack offset")
+	ErrUnInitializedParent = origin_errors.New("un-initialized parent layer")
 )
 
 // MACAddr ethernet mac address
@@ -43,6 +49,32 @@ type EtherHeader struct {
 	SrcHost MACAddr
 	// IP? ARP? RARP? etc
 	Type EtherType
+}
+
+func (hdr *EtherFrame) Unpack(buff []byte) error {
+	buffLen := len(buff)
+	if buffLen < EtherHeaderSize {
+		return errors.WithStack(ErrInsufficentData)
+	}
+
+	offset := 0
+
+	offset += copy(hdr.DstHost[:], buff[offset:])
+
+	offset += copy(hdr.SrcHost[:], buff[offset:])
+
+	hdr.Type = EtherType(ntohs(buff, &offset))
+
+	if offset != EtherHeaderSize {
+		panic(errors.Wrap(
+			ErrUnpackOffset,
+			fmt.Sprintf(
+				"eh[%d] offset invalid: %d",
+				EtherHeaderSize, offset,
+			)))
+	}
+
+	return nil
 }
 
 // IPv4Addr ip v4 address
@@ -88,46 +120,47 @@ type IPv4Header struct {
 	DstAddr IPv4Addr
 }
 
-func (hdr *IPv4Header) PayloadOffset() int {
-	return int(hdr.VerIHL&0xf) * 4
-}
-
 func (hdr *IPv4Header) Unpack(buff []byte) error {
 	buffSize := len(buff)
 	if buffSize < IPv4HeaderBaseSize {
-		return errors.Cause(ErrInsufficentData)
+		return errors.WithStack(ErrInsufficentData)
 	}
 
 	offset := 0
 
-	hdr.VerIHL = buff[offset]
-	offset++
+	hdr.VerIHL = nbyte(buff, &offset)
 
-	hdr.TOS = buff[offset]
-	offset++
+	hdr.TOS = nbyte(buff, &offset)
 
-	hdr.TotalLength = binary.BigEndian.Uint16(buff[offset:])
-	offset += 2
+	hdr.TotalLength = ntohs(buff, &offset)
 
-	hdr.Identification = binary.BigEndian.Uint16(buff[offset:])
-	offset += 2
+	hdr.Identification = ntohs(buff, &offset)
 
-	hdr.Flags = binary.BigEndian.Uint16(buff[offset:])
-	offset += 2
+	hdr.Flags = ntohs(buff, &offset)
 
-	hdr.TTL = buff[offset]
-	offset++
+	hdr.TTL = nbyte(buff, &offset)
 
-	hdr.Protocol = TransProto(buff[offset])
-	offset++
+	hdr.Protocol = TransProto(nbyte(buff, &offset))
 
-	hdr.CRC = binary.BigEndian.Uint16(buff[offset:])
-	offset += 2
+	hdr.CRC = ntohs(buff, &offset)
 
 	offset += copy(hdr.SrcAddr[:], buff[offset:])
 	offset += copy(hdr.DstAddr[:], buff[offset:])
 
+	if offset != IPv4HeaderBaseSize {
+		panic(errors.Wrap(
+			ErrUnpackOffset,
+			fmt.Sprintf(
+				"ih[%d] offset invalid: %d",
+				IPv4HeaderBaseSize, offset,
+			)))
+	}
+
 	return nil
+}
+
+func (hdr *IPv4Header) PayloadOffset() int {
+	return int(hdr.VerIHL&0xf) * 4
 }
 
 // TCPSeq tcp sequence
@@ -179,36 +212,41 @@ func (hdr *TCPHeader) Unpack(buff []byte) error {
 	buffLen := len(buff)
 
 	if buffLen < TCPHeaderBaseSize {
-		return errors.Cause(ErrInsufficentData)
+		return errors.WithStack(ErrInsufficentData)
 	}
 
 	offset := 0
 
-	hdr.SrcPort = binary.BigEndian.Uint16(buff[offset:])
-	offset += 2
+	hdr.SrcPort = ntohs(buff, &offset)
 
-	hdr.DstPort = binary.BigEndian.Uint16(buff[offset:])
-	offset += 2
+	hdr.DstPort = ntohs(buff, &offset)
 
-	hdr.Seq = TCPSeq(binary.BigEndian.Uint32(buff[offset:]))
-	offset += 4
+	hdr.Seq = TCPSeq(ntohl(buff, &offset))
 
-	hdr.Ack = TCPSeq(binary.BigEndian.Uint32(buff[offset:]))
-	offset += 4
+	hdr.Ack = TCPSeq(ntohl(buff, &offset))
 
-	hdr.Offset = TCPOffset(buff[offset])
-	offset++
+	hdr.Offset = TCPOffset(nbyte(buff, &offset))
 
-	hdr.Flags = TCPFlags(buff[offset])
-	offset++
+	hdr.Flags = TCPFlags(nbyte(buff, &offset))
 
-	hdr.Window = binary.BigEndian.Uint16(buff[offset:])
-	offset += 2
+	hdr.Window = ntohs(buff, &offset)
 
-	hdr.Checksum = binary.BigEndian.Uint16(buff[offset:])
-	offset += 2
+	hdr.Checksum = ntohs(buff, &offset)
+
+	if offset != TCPHeaderBaseSize {
+		panic(errors.Wrap(
+			ErrUnpackOffset,
+			fmt.Sprintf(
+				"th[%d] offset invalid: %d",
+				TCPHeaderBaseSize, offset,
+			)))
+	}
 
 	return nil
+}
+
+func (hdr *TCPHeader) PayloadOffset() int {
+	return int(hdr.Offset>>4) * 4
 }
 
 // UDPHeader udp header
@@ -221,4 +259,179 @@ type UDPHeader struct {
 	Len uint16
 	// Checksum
 	CRC uint16
+}
+
+func (hdr *UDPHeader) Unpack(buff []byte) error {
+	buffLen := len(buff)
+	if buffLen < UDPHeaderSize {
+		return errors.WithStack(ErrInsufficentData)
+	}
+
+	offset := 0
+
+	hdr.SrcPort = ntohs(buff, &offset)
+
+	hdr.DstPort = ntohs(buff, &offset)
+
+	hdr.Len = ntohs(buff, &offset)
+
+	hdr.CRC = ntohs(buff, &offset)
+
+	if offset != UDPHeaderSize {
+		panic(errors.Wrap(
+			ErrUnpackOffset,
+			fmt.Sprintf(
+				"uh[%d] offset invalid: %d",
+				UDPHeaderSize, offset,
+			)))
+	}
+
+	return nil
+}
+
+func (hdr *UDPHeader) PayloadOffset() int {
+	return UDPHeaderSize
+}
+
+type PktData interface {
+	Unpack([]byte) error
+	Release()
+	GetParent() PktData
+	GetPayload() []byte
+	GetTimestamp() time.Time
+}
+
+type EtherFrame struct {
+	EtherHeader
+	Buffer    []byte
+	Timestamp time.Time
+}
+
+func (frm *EtherFrame) Release() {
+	etherFrmPool.Put(frm)
+	payloadPool.Put(frm.Buffer[:0])
+}
+
+func (frm *EtherFrame) GetParent() PktData {
+	return nil
+}
+
+func (frm *EtherFrame) GetPayload() []byte {
+	if len(frm.Buffer) < EtherHeaderSize {
+		panic(errors.WithStack(ErrInsufficentData))
+	}
+
+	return frm.Buffer[EtherHeaderSize:]
+}
+
+func (frm *EtherFrame) GetTimestamp() time.Time {
+	return frm.Timestamp
+}
+
+type IPv4Packet struct {
+	IPv4Header
+	parent *EtherFrame
+}
+
+func (pkt *IPv4Packet) Release() {
+	ipv4PktPool.Put(pkt)
+
+	if pkt.parent != nil {
+		pkt.parent.Release()
+	}
+}
+
+func (pkt *IPv4Packet) GetParent() PktData {
+	return pkt.parent
+}
+
+func (pkt *IPv4Packet) GetPayload() []byte {
+	if pkt.parent == nil {
+		panic(errors.WithStack(ErrUnInitializedParent))
+	}
+
+	return pkt.parent.GetPayload()[pkt.PayloadOffset():]
+}
+
+func (pkt *IPv4Packet) GetTimestamp() time.Time {
+	return pkt.parent.GetTimestamp()
+}
+
+type TCPSegment struct {
+	TCPHeader
+	parent *IPv4Packet
+}
+
+func (seg *TCPSegment) Release() {
+	tcpSegPool.Put(seg)
+	seg.parent.Release()
+}
+
+func (seg *TCPSegment) GetParent() PktData {
+	return seg.parent
+}
+
+func (seg *TCPSegment) GetPayload() []byte {
+	return seg.parent.GetPayload()[seg.PayloadOffset():]
+}
+
+func (seg *TCPSegment) GetTimestamp() time.Time {
+	return seg.parent.GetTimestamp()
+}
+
+type UDPSegment struct {
+	UDPHeader
+	parent *IPv4Packet
+}
+
+func (seg *UDPSegment) Release() {
+	udpSegPool.Put(seg)
+	seg.parent.Release()
+}
+
+func (seg *UDPSegment) GetParent() PktData {
+	return seg.parent
+}
+
+func (seg *UDPSegment) GetPayload() []byte {
+	return seg.parent.GetPayload()[seg.PayloadOffset():]
+}
+
+func (seg *UDPSegment) GetTimestamp() time.Time {
+	return seg.parent.GetTimestamp()
+}
+
+var (
+	mtu          = 1500
+	etherFrmPool = sync.Pool{New: func() any { return &EtherFrame{Buffer: payloadPool.Get().([]byte)} }}
+	ipv4PktPool  = sync.Pool{New: func() any { return &IPv4Packet{} }}
+	tcpSegPool   = sync.Pool{New: func() any { return &TCPSegment{} }}
+	udpSegPool   = sync.Pool{New: func() any { return &UDPSegment{} }}
+	payloadPool  = sync.Pool{New: func() any { return make([]byte, 0, mtu) }}
+)
+
+func SetMTU(v int) {
+	mtu = v
+}
+
+func CreateEtherFrame() *EtherFrame {
+	return etherFrmPool.Get().(*EtherFrame)
+}
+
+func CreateIPv4Packet(frm *EtherFrame) *IPv4Packet {
+	pkt := ipv4PktPool.Get().(*IPv4Packet)
+	pkt.parent = frm
+	return pkt
+}
+
+func CreateTCPSegment(pkt *IPv4Packet) *TCPSegment {
+	seg := tcpSegPool.Get().(*TCPSegment)
+	seg.parent = pkt
+	return seg
+}
+
+func CreateUDPSegment(pkt *IPv4Packet) *UDPSegment {
+	seg := udpSegPool.Get().(*UDPSegment)
+	seg.parent = pkt
+	return seg
 }

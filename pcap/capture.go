@@ -8,12 +8,11 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/frozenpine/pkt4go"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	libpcap "github.com/google/gopacket/pcap"
 	"github.com/pkg/errors"
-
-	"github.com/frozenpine/pkg4go"
 )
 
 const (
@@ -75,7 +74,7 @@ func CreateHandler(dataSrc string) (handle *libpcap.Handle, err error) {
 	return
 }
 
-func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, fn pkg4go.DataHandler) error {
+func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, fn pkt4go.DataHandler) error {
 	if err := handler.SetBPFFilter(filter); err != nil {
 		return errors.WithStack(err)
 	}
@@ -85,8 +84,8 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 	}
 
 	var (
-		tcpSessionBuffers = make(map[uint64][]byte)
-		err               error
+		sessionBuffers = make(map[uint64][]byte)
+		err            error
 	)
 
 	packets := gopacket.NewPacketSource(handler, handler.LinkType()).Packets()
@@ -110,7 +109,11 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 			}
 
 			var (
-				src, dst net.Addr
+				src, dst    net.Addr
+				usedSize    int
+				flowHash    uint64
+				buffer      []byte
+				bufferExist bool
 			)
 
 			switch ip.NextLayerType() {
@@ -119,15 +122,17 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 				src = &net.TCPAddr{IP: ip.SrcIP, Port: int(tcp.SrcPort)}
 				dst = &net.TCPAddr{IP: ip.DstIP, Port: int(tcp.DstPort)}
 
+				flowHash = tcp.TransportFlow().FastHash()
+
 				// 检查3次握手的ack, 确保buffer从头开始
 				if tcp.SYN && tcp.ACK {
-					tcpSessionBuffers[tcp.TransportFlow().FastHash()] = make([]byte, 0, defaultTCPBufferLen)
+					sessionBuffers[flowHash] = make([]byte, 0, defaultTCPBufferLen)
 					continue
 				}
 
 				// TCP会话结束, 清理session cache
 				if tcp.FIN && tcp.ACK {
-					delete(tcpSessionBuffers, tcp.TransportFlow().FastHash())
+					delete(sessionBuffers, flowHash)
 					continue
 				}
 
@@ -135,26 +140,25 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 					continue
 				}
 
-				buffer, exist := tcpSessionBuffers[tcp.TransportFlow().FastHash()]
-				if !exist {
+				buffer, bufferExist = sessionBuffers[flowHash]
+				if !bufferExist {
 					continue
 				}
 				buffer = append(buffer, tcp.Payload...)
-
-				var usedSize int
-				usedSize, err = fn(src, dst, buffer)
-				if usedSize >= 0 {
-					tcpSessionBuffers[tcp.TransportFlow().FastHash()] = buffer[usedSize:]
-				}
 			case layers.LayerTypeUDP:
 				udp, _ := pkg.Layer(layers.LayerTypeUDP).(*layers.UDP)
 				src = &net.UDPAddr{IP: ip.SrcIP, Port: int(udp.SrcPort)}
 				dst = &net.UDPAddr{IP: ip.DstIP, Port: int(udp.DstPort)}
 
-				_, err = fn(src, dst, udp.Payload)
+				flowHash = udp.TransportFlow().FastHash()
+				if buffer, bufferExist = sessionBuffers[flowHash]; bufferExist {
+					buffer = append(buffer, udp.Payload...)
+				}
 			default:
 				log.Println("unsupported Transport Layer: " + ip.NextLayerType().String())
 			}
+
+			usedSize, err = fn(src, dst, buffer)
 
 			if err != nil {
 				if err == io.EOF {
@@ -162,6 +166,8 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 				}
 
 				log.Printf("[%s] %s -> %s data handler failed: %v", pkg.Metadata().Timestamp, src, dst, err)
+			} else if len(buffer) != usedSize {
+				sessionBuffers[flowHash] = buffer[usedSize:]
 			}
 		}
 	}

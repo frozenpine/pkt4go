@@ -6,13 +6,14 @@ package exanic
 #cgo CFLAGS: -I${SRCDIR}/include
 #cgo LDFLAGS: -lexanic
 
+#include <stdint.h>
 #include <stdlib.h>
-#include <stdbool.h>
-#include <string.h>
 
 #include <exanic/exanic.h>
 #include <exanic/fifo_rx.h>
 #include <exanic/filter.h>
+#include <exanic/time.h>
+#include "exanic_version.h"
 */
 import "C"
 import (
@@ -20,11 +21,12 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/pkg/errors"
 
-	"github.com/frozenpine/pkg4go"
+	"github.com/frozenpine/pkt4go"
 )
 
 const (
@@ -78,12 +80,13 @@ func createFilter(input string) *C.exanic_ip_filter_t {
 }
 
 type pkgData struct {
-	src    net.Addr
-	dst    net.Addr
-	buffer []byte
+	src     net.Addr
+	dst     net.Addr
+	payload []byte
+	ts      time.Time
 }
 
-func StartCapture(ctx context.Context, dev *Device, filter string, fn pkg4go.DataHandler) error {
+func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.DataHandler) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -107,6 +110,7 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkg4go.Dat
 
 	buffer := [defaultBufferLen]byte{}
 	var timestamp C.exanic_cycles32_t
+	var tsps C.struct_timespec
 
 	pkgCh := make(chan *pkgData, defaultPkgBufferLen)
 
@@ -115,10 +119,12 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkg4go.Dat
 			close(pkgCh)
 		}()
 
+		bufferPointer := (*C.char)(unsafe.Pointer(&buffer))
+
 		for {
 			size := C.exanic_receive_frame(
 				rx,
-				(*C.char)(unsafe.Pointer(&buffer)),
+				bufferPointer,
 				C.size_t(defaultBufferLen),
 				&timestamp,
 			)
@@ -127,10 +133,14 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkg4go.Dat
 				continue
 			}
 
+			expandTs := C.exanic_expand_timestamp(dev.handler, timestamp)
+			C.exanic_cycles_to_timespec(dev.handler, expandTs, &tsps)
+
 			pkgCh <- &pkgData{
-				src:    nil,
-				dst:    nil,
-				buffer: buffer[:size],
+				src:     nil,
+				dst:     nil,
+				payload: buffer[:size],
+				ts:      time.Unix(int64(tsps.tv_sec), int64(tsps.tv_nsec)),
 			}
 		}
 	}()
@@ -144,7 +154,7 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkg4go.Dat
 				return nil
 			}
 
-			fn(pkg.src, pkg.dst, pkg.buffer)
+			fn(pkg.src, pkg.dst, pkg.payload)
 		}
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/frozenpine/pkg4go/pcap"
+	"github.com/frozenpine/pkt4go/pcap"
 )
 
 func TestCaputureTime(t *testing.T) {

@@ -14,10 +14,10 @@ import (
 type DataHandler func(src, dst net.Addr, data []byte) (int, error)
 
 var (
-	EtherHeaderSize = binary.Size(EtherHeader{})
-	IPv4HeaderSize  = binary.Size(IPv4Header{})
-	TCPHeaderSize   = binary.Size(TCPHeader{}) - 2
-	UDPHeaderSize   = binary.Size(UDPHeader{})
+	EtherHeaderSize    = binary.Size(EtherHeader{})
+	IPv4HeaderBaseSize = binary.Size(IPv4Header{})
+	TCPHeaderBaseSize  = binary.Size(TCPHeader{})
+	UDPHeaderSize      = binary.Size(UDPHeader{})
 
 	ErrInsufficentData = origin_errors.New("insufficent data length")
 )
@@ -86,12 +86,48 @@ type IPv4Header struct {
 	SrcAddr IPv4Addr
 	// Destination address
 	DstAddr IPv4Addr
-	// Option + Padding
-	OptPad uint32
 }
 
 func (hdr *IPv4Header) PayloadOffset() int {
 	return int(hdr.VerIHL&0xf) * 4
+}
+
+func (hdr *IPv4Header) Unpack(buff []byte) error {
+	buffSize := len(buff)
+	if buffSize < IPv4HeaderBaseSize {
+		return errors.Cause(ErrInsufficentData)
+	}
+
+	offset := 0
+
+	hdr.VerIHL = buff[offset]
+	offset++
+
+	hdr.TOS = buff[offset]
+	offset++
+
+	hdr.TotalLength = binary.BigEndian.Uint16(buff[offset:])
+	offset += 2
+
+	hdr.Identification = binary.BigEndian.Uint16(buff[offset:])
+	offset += 2
+
+	hdr.Flags = binary.BigEndian.Uint16(buff[offset:])
+	offset += 2
+
+	hdr.TTL = buff[offset]
+	offset++
+
+	hdr.Protocol = TransProto(buff[offset])
+	offset++
+
+	hdr.CRC = binary.BigEndian.Uint16(buff[offset:])
+	offset += 2
+
+	offset += copy(hdr.SrcAddr[:], buff[offset:])
+	offset += copy(hdr.DstAddr[:], buff[offset:])
+
+	return nil
 }
 
 // TCPSeq tcp sequence
@@ -137,14 +173,12 @@ type TCPHeader struct {
 	Window uint16
 	// checksum
 	Checksum uint16
-	// urgent pointer
-	URP uint16
 }
 
 func (hdr *TCPHeader) Unpack(buff []byte) error {
 	buffLen := len(buff)
 
-	if buffLen < TCPHeaderSize {
+	if buffLen < TCPHeaderBaseSize {
 		return errors.Cause(ErrInsufficentData)
 	}
 
@@ -163,25 +197,16 @@ func (hdr *TCPHeader) Unpack(buff []byte) error {
 	offset += 4
 
 	hdr.Offset = TCPOffset(buff[offset])
-	offset += 1
+	offset++
 
 	hdr.Flags = TCPFlags(buff[offset])
-	offset += 1
+	offset++
 
 	hdr.Window = binary.BigEndian.Uint16(buff[offset:])
 	offset += 2
 
 	hdr.Checksum = binary.BigEndian.Uint16(buff[offset:])
 	offset += 2
-
-	if hdr.Flags.HasFlag(URG) {
-		if buffLen < TCPHeaderSize+2 {
-			return errors.Cause(ErrInsufficentData)
-		}
-
-		hdr.URP = binary.BigEndian.Uint16(buff[offset:])
-		offset += 2
-	}
 
 	return nil
 }

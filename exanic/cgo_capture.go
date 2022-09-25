@@ -18,9 +18,10 @@ package exanic
 import "C"
 import (
 	"context"
-	"net"
+	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -79,11 +80,40 @@ func createFilter(input string) *C.exanic_ip_filter_t {
 	return &filter
 }
 
-type pkgData struct {
-	src     net.Addr
-	dst     net.Addr
-	payload []byte
-	ts      time.Time
+type IPv4Packet struct {
+	Header    *pkt4go.IPv4Header
+	Payload   []byte
+	Timestamp time.Time
+}
+
+type TCPSegment struct {
+	Header  *pkt4go.TCPHeader
+	Payload []byte
+}
+
+type UDPSegment struct {
+	Header  *pkt4go.UDPHeader
+	Payload []byte
+}
+
+var (
+	MTU            = 1500
+	ipv4HeaderPool = sync.Pool{New: func() any { return &pkt4go.IPv4Header{} }}
+	tcpHeaderPool  = sync.Pool{New: func() any { return &pkt4go.TCPHeader{} }}
+	udpHeaderPool  = sync.Pool{New: func() any { return &pkt4go.UDPHeader{} }}
+	payloadPool    = sync.Pool{New: func() any { return make([]byte, 0, MTU) }}
+)
+
+func GetIPv4Packet() *IPv4Packet {
+	return &IPv4Packet{
+		Header:  ipv4HeaderPool.Get().(*pkt4go.IPv4Header),
+		Payload: payloadPool.Get().([]byte),
+	}
+}
+
+func ReleaseIPv4Packet(pkt *IPv4Packet) {
+	ipv4HeaderPool.Put(pkt.Header)
+	payloadPool.Put(pkt.Payload[:0])
 }
 
 func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.DataHandler) error {
@@ -108,40 +138,42 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 		return errors.Errorf("create filter failed: %s", C.GoString(C.exanic_get_last_error()))
 	}
 
-	buffer := [defaultBufferLen]byte{}
-	var timestamp C.exanic_cycles32_t
-	var tsps C.struct_timespec
-
-	pkgCh := make(chan *pkgData, defaultPkgBufferLen)
+	pktCh := make(chan *IPv4Packet, defaultPkgBufferLen)
 
 	go func() {
 		defer func() {
-			close(pkgCh)
+			close(pktCh)
 		}()
 
-		bufferPointer := (*C.char)(unsafe.Pointer(&buffer))
-
 		for {
+			data := GetIPv4Packet()
+
+			var timestamp C.exanic_cycles32_t
+			var tsps C.struct_timespec
+
 			size := C.exanic_receive_frame(
 				rx,
-				bufferPointer,
+				(*C.char)(unsafe.Pointer(&data.Payload)),
 				C.size_t(defaultBufferLen),
 				&timestamp,
 			)
 
 			if size < 0 {
+				ReleaseIPv4Packet(data)
 				continue
 			}
 
 			expandTs := C.exanic_expand_timestamp(dev.handler, timestamp)
 			C.exanic_cycles_to_timespec(dev.handler, expandTs, &tsps)
+			data.Timestamp = time.Unix(int64(tsps.tv_sec), int64(tsps.tv_nsec))
 
-			pkgCh <- &pkgData{
-				src:     nil,
-				dst:     nil,
-				payload: buffer[:size],
-				ts:      time.Unix(int64(tsps.tv_sec), int64(tsps.tv_nsec)),
+			if err := data.Header.Unpack(data.Payload[pkt4go.EtherHeaderSize:]); err != nil {
+				log.Printf("unpack ip header failed: %v", err)
+				ReleaseIPv4Packet(data)
+				continue
 			}
+
+			pktCh <- data
 		}
 	}()
 
@@ -149,12 +181,14 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 		select {
 		case <-ctx.Done():
 			return nil
-		case pkg := <-pkgCh:
-			if pkg == nil {
+		case pkt := <-pktCh:
+			if pkt == nil {
 				return nil
 			}
 
-			fn(pkg.src, pkg.dst, pkg.payload)
+			// fn(pkg.src, pkg.dst, pkg.payload)
+
+			ReleaseIPv4Packet(pkt)
 		}
 	}
 }

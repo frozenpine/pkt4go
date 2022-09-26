@@ -4,7 +4,7 @@ package exanic
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/include
-#cgo LDFLAGS: -lexanic
+#cgo LDFLAGS: -L${SRCDIR}/libs -lexanic
 
 #include <stdint.h>
 #include <stdlib.h>

@@ -25,10 +25,8 @@ int link_type;
 bool is_offline;
 
 #define ETHER_ADDR_LEN 6
-
 #define PROTO_IP 0x0800
 #define PROTO_ARP 0x0806
-
 #define PROTO_TCP 0x06
 #define PROTO_UDP 0x11
 

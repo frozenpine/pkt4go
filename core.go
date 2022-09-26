@@ -33,7 +33,7 @@ type MACAddr [6]byte
 
 func (addr MACAddr) String() string {
 	return fmt.Sprintf(
-		"%x:%x:%x:%x:%x:%x",
+		"%02x:%02x:%02x:%02x:%02x:%02x",
 		addr[0], addr[1], addr[2],
 		addr[3], addr[4], addr[5],
 	)
@@ -407,7 +407,7 @@ func (seg *UDPSegment) GetTimestamp() time.Time {
 
 var (
 	mtu          = 1500
-	etherFrmPool = sync.Pool{New: func() any { return &EtherFrame{Buffer: make([]byte, mtu)} }}
+	etherFrmPool = sync.Pool{New: func() any { return &EtherFrame{} }}
 	ipv4PktPool  = sync.Pool{New: func() any { return &IPv4Packet{} }}
 	tcpSegPool   = sync.Pool{New: func() any { return &TCPSegment{} }}
 	udpSegPool   = sync.Pool{New: func() any { return &UDPSegment{} }}
@@ -416,6 +416,10 @@ var (
 
 func SetMTU(v int) {
 	mtu = v
+}
+
+func GetMTU() int {
+	return mtu
 }
 
 func CreateEtherFrame() *EtherFrame {

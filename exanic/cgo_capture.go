@@ -29,10 +29,7 @@ import (
 )
 
 const (
-	defaultBufferLen    = 4096
 	defaultPktBufferLen = 100
-
-	mtu = 1500
 )
 
 type Device struct {
@@ -103,8 +100,12 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 		rx = C.exanic_acquire_rx_buffer(dev.handler, C.int(dev.port), 0)
 	}
 
+	cBufferLen := pkt4go.GetMTU()
+	cBuffer := C.malloc(C.size_t(cBufferLen))
+
 	defer func() {
 		C.exanic_release_rx_buffer(rx)
+		C.free(cBuffer)
 	}()
 
 	pktCh := make(chan *pkt4go.IPv4Packet, defaultPktBufferLen)
@@ -122,8 +123,8 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 
 			size := C.exanic_receive_frame(
 				rx,
-				(*C.char)(C.CBytes(frm.Buffer)),
-				C.size_t(len(frm.Buffer)),
+				(*C.char)(cBuffer),
+				C.size_t(cBufferLen),
 				&timestamp,
 			)
 
@@ -132,7 +133,22 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 				continue
 			}
 
-			frm.Buffer = frm.Buffer[:size]
+			/*
+				NOTE:
+				sync host time / PPS to exanic first, to correct UNIX epoch
+
+				REF:
+				https://exablaze.com/docs/exanic/user-guide/clock-sync/
+
+				EXAMPLE:
+				# exanic-clock-sync exanic0:host
+			*/
+			expandTs := C.exanic_expand_timestamp(dev.handler, timestamp)
+			C.exanic_cycles_to_timespec(dev.handler, expandTs, &tsps)
+			frm.Timestamp = time.Unix(
+				int64(tsps.tv_sec), int64(tsps.tv_nsec),
+			)
+			frm.Buffer = C.GoBytes(cBuffer, C.int(size))
 
 			if err := frm.Unpack(frm.Buffer); err != nil {
 				log.Printf("unpack eth header failed: %v", err)
@@ -140,16 +156,10 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 				frm.Release()
 				continue
 			} else if frm.Type != pkt4go.ProtoIP {
-				log.Printf("Received ether frame[%x]: %s -> %s", frm.Type, frm.SrcHost, frm.DstHost)
+				log.Printf("%s received ether frame[%04x]: %s -> %s", frm.Timestamp, frm.Type, frm.SrcHost, frm.DstHost)
 				frm.Release()
 				continue
 			}
-
-			expandTs := C.exanic_expand_timestamp(dev.handler, timestamp)
-			C.exanic_cycles_to_timespec(dev.handler, expandTs, &tsps)
-			frm.Timestamp = time.Unix(
-				int64(tsps.tv_sec), int64(tsps.tv_nsec),
-			)
 
 			pkt := pkt4go.CreateIPv4Packet(frm)
 

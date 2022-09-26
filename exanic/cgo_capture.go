@@ -121,7 +121,7 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 				&timestamp,
 			)
 
-			if size < 0 {
+			if size <= 0 {
 				frm.Release()
 				continue
 			}
@@ -138,6 +138,7 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 
 			if err := pkt.Unpack(frm.GetPayload()); err != nil {
 				log.Printf("unpack ip header failed: %v", err)
+				log.Printf("%+v", frm)
 				pkt.Release()
 				continue
 			}

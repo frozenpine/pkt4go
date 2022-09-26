@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"net"
 	"os"
@@ -12,8 +13,14 @@ import (
 	"github.com/frozenpine/pkt4go/exanic"
 )
 
+var (
+	source = "exanic0:0"
+)
+
 func init() {
 	log.SetFlags(log.Flags() | log.Lmicroseconds)
+
+	flag.StringVar(&source, "src", source, "capture source")
 }
 
 func handler(src, dst net.Addr, payload []byte) (int, error) {

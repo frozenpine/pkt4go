@@ -41,6 +41,10 @@ func (addr MACAddr) String() string {
 
 type EtherType uint16
 
+const (
+	ProtoIP EtherType = 0x0800 // ip
+)
+
 // EtherHeader ethernet header
 type EtherHeader struct {
 	// Destination host address
@@ -309,7 +313,7 @@ type EtherFrame struct {
 
 func (frm *EtherFrame) Release() {
 	etherFrmPool.Put(frm)
-	payloadPool.Put(frm.Buffer[:0])
+	// payloadPool.Put(frm.Buffer)
 }
 
 func (frm *EtherFrame) GetParent() PktData {
@@ -403,11 +407,11 @@ func (seg *UDPSegment) GetTimestamp() time.Time {
 
 var (
 	mtu          = 1500
-	etherFrmPool = sync.Pool{New: func() any { return &EtherFrame{Buffer: payloadPool.Get().([]byte)} }}
+	etherFrmPool = sync.Pool{New: func() any { return &EtherFrame{Buffer: make([]byte, mtu)} }}
 	ipv4PktPool  = sync.Pool{New: func() any { return &IPv4Packet{} }}
 	tcpSegPool   = sync.Pool{New: func() any { return &TCPSegment{} }}
 	udpSegPool   = sync.Pool{New: func() any { return &UDPSegment{} }}
-	payloadPool  = sync.Pool{New: func() any { return make([]byte, 0, mtu) }}
+	// payloadPool  = sync.Pool{New: func() any { return make([]byte, mtu) }}
 )
 
 func SetMTU(v int) {

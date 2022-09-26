@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/pkg/errors"
 
@@ -32,6 +31,8 @@ import (
 const (
 	defaultBufferLen    = 4096
 	defaultPktBufferLen = 100
+
+	mtu = 1500
 )
 
 type Device struct {
@@ -86,18 +87,25 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 		C.exanic_release_handle(dev.handler)
 	}()
 
-	rx := C.exanic_acquire_unused_filter_buffer(dev.handler, C.int(dev.port))
-	if rx == nil {
-		return errors.New("accquire rx buffer failed")
+	var rx *C.exanic_rx_t
+
+	if filter != "" {
+		rx = C.exanic_acquire_unused_filter_buffer(dev.handler, C.int(dev.port))
+		if rx == nil {
+			return errors.New("accquire rx buffer failed")
+		}
+
+		exaFilter := createFilter(filter)
+		if exaFilter != nil && C.exanic_filter_add_ip(dev.handler, rx, exaFilter) == -1 {
+			return errors.Errorf("create filter failed: %s", C.GoString(C.exanic_get_last_error()))
+		}
+	} else {
+		rx = C.exanic_acquire_rx_buffer(dev.handler, C.int(dev.port), 0)
 	}
+
 	defer func() {
 		C.exanic_release_rx_buffer(rx)
 	}()
-
-	exaFilter := createFilter(filter)
-	if exaFilter != nil && C.exanic_filter_add_ip(dev.handler, rx, exaFilter) == -1 {
-		return errors.Errorf("create filter failed: %s", C.GoString(C.exanic_get_last_error()))
-	}
 
 	pktCh := make(chan *pkt4go.IPv4Packet, defaultPktBufferLen)
 
@@ -114,8 +122,8 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 
 			size := C.exanic_receive_frame(
 				rx,
-				(*C.char)(unsafe.Pointer(&frm.Buffer)),
-				C.size_t(defaultBufferLen),
+				(*C.char)(C.CBytes(frm.Buffer)),
+				C.size_t(len(frm.Buffer)),
 				&timestamp,
 			)
 
@@ -124,7 +132,18 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 				continue
 			}
 
-			// TODO: ether frame unpack and data check
+			frm.Buffer = frm.Buffer[:size]
+
+			if err := frm.Unpack(frm.Buffer); err != nil {
+				log.Printf("unpack eth header failed: %v", err)
+				log.Printf("%+v", frm)
+				frm.Release()
+				continue
+			} else if frm.Type != pkt4go.ProtoIP {
+				log.Printf("Received ether frame[%x]: %s -> %s", frm.Type, frm.SrcHost, frm.DstHost)
+				frm.Release()
+				continue
+			}
 
 			expandTs := C.exanic_expand_timestamp(dev.handler, timestamp)
 			C.exanic_cycles_to_timespec(dev.handler, expandTs, &tsps)
@@ -140,6 +159,8 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 				pkt.Release()
 				continue
 			}
+
+			// TODO: 排查可能的oom kill
 
 			pktCh <- pkt
 		}

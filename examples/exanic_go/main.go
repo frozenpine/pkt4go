@@ -20,7 +20,7 @@ var (
 func init() {
 	log.SetFlags(log.Flags() | log.Lmicroseconds)
 
-	flag.StringVar(&source, "src", source, "capture source")
+	flag.StringVar(&source, "src", source, "Capture device")
 }
 
 func handler(src, dst net.Addr, payload []byte) (int, error) {
@@ -30,7 +30,7 @@ func handler(src, dst net.Addr, payload []byte) (int, error) {
 }
 
 func main() {
-	device, err := exanic.CreateHandler("exanic0:0")
+	device, err := exanic.CreateHandler(source)
 
 	if err != nil {
 		log.Fatal(err)
@@ -41,5 +41,7 @@ func main() {
 		os.Interrupt, os.Kill,
 	)
 
-	exanic.StartCapture(ctx, device, "", handler)
+	if err = exanic.StartCapture(ctx, device, "", handler); err != nil {
+		log.Fatal(err)
+	}
 }

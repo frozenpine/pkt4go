@@ -32,8 +32,6 @@ import (
 const (
 	defaultBufferLen    = 4096
 	defaultPktBufferLen = 100
-
-	PORT_KEY = "port"
 )
 
 type Device struct {
@@ -43,7 +41,7 @@ type Device struct {
 
 func CreateHandler(src string) (*Device, error) {
 	if src == "" {
-		return nil, errors.New("device can not be enpty")
+		return nil, errors.New("device can not be empty")
 	}
 
 	devData := strings.Split(src, ":")

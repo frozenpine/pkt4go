@@ -3,8 +3,8 @@
 package exanic
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/include
-#cgo LDFLAGS: -L${SRCDIR}/libs -lexanic
+#cgo CFLAGS: -I./include
+#cgo LDFLAGS: -L./libs -lexanic
 
 #include <stdint.h>
 #include <stdlib.h>

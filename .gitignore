@@ -19,3 +19,7 @@
 
 # Go workspace file
 go.work
+.vscode
+
+examples/exanic_go/exanic_go
+examples/exanic_c/exanic_c

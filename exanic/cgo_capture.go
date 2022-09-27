@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/pkg/errors"
 
@@ -100,12 +101,12 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 		rx = C.exanic_acquire_rx_buffer(dev.handler, C.int(dev.port), 0)
 	}
 
-	cBufferLen := pkt4go.GetMTU()
-	cBuffer := C.malloc(C.size_t(cBufferLen))
+	// cBufferLen := pkt4go.GetMTU()
+	// cBuffer := C.malloc(C.size_t(cBufferLen))
 
 	defer func() {
 		C.exanic_release_rx_buffer(rx)
-		C.free(cBuffer)
+		// C.free(cBuffer)
 	}()
 
 	pktCh := make(chan *pkt4go.IPv4Packet, defaultPktBufferLen)
@@ -121,10 +122,16 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 			var timestamp C.exanic_cycles32_t
 			var tsps C.struct_timespec
 
+			// size := C.exanic_receive_frame(
+			// 	rx,
+			// 	(*C.char)(cBuffer),
+			// 	C.size_t(cBufferLen),
+			// 	&timestamp,
+			// )
 			size := C.exanic_receive_frame(
 				rx,
-				(*C.char)(cBuffer),
-				C.size_t(cBufferLen),
+				(*C.char)(unsafe.Pointer(&frm.Buffer[0])),
+				C.size_t(len(frm.Buffer)),
 				&timestamp,
 			)
 
@@ -148,7 +155,8 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 			frm.Timestamp = time.Unix(
 				int64(tsps.tv_sec), int64(tsps.tv_nsec),
 			)
-			frm.Buffer = C.GoBytes(cBuffer, C.int(size))
+			// frm.Buffer = C.GoBytes(cBuffer, C.int(size))
+			frm.Buffer = frm.Buffer[:size]
 
 			if err := frm.Unpack(frm.Buffer); err != nil {
 				log.Printf("unpack eth header failed: %v", err)

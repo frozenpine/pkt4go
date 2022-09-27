@@ -313,7 +313,7 @@ type EtherFrame struct {
 
 func (frm *EtherFrame) Release() {
 	etherFrmPool.Put(frm)
-	// payloadPool.Put(frm.Buffer)
+	payloadPool.Put(frm.Buffer)
 }
 
 func (frm *EtherFrame) GetParent() PktData {
@@ -407,11 +407,11 @@ func (seg *UDPSegment) GetTimestamp() time.Time {
 
 var (
 	mtu          = 1500
-	etherFrmPool = sync.Pool{New: func() any { return &EtherFrame{} }}
+	etherFrmPool = sync.Pool{New: func() any { return &EtherFrame{Buffer: payloadPool.Get().([]byte)} }}
 	ipv4PktPool  = sync.Pool{New: func() any { return &IPv4Packet{} }}
 	tcpSegPool   = sync.Pool{New: func() any { return &TCPSegment{} }}
 	udpSegPool   = sync.Pool{New: func() any { return &UDPSegment{} }}
-	// payloadPool  = sync.Pool{New: func() any { return make([]byte, mtu) }}
+	payloadPool  = sync.Pool{New: func() any { return make([]byte, mtu) }}
 )
 
 func SetMTU(v int) {

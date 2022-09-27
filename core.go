@@ -300,7 +300,8 @@ func (hdr *UDPHeader) PayloadOffset() int {
 type PktData interface {
 	Unpack([]byte) error
 	Release()
-	GetParent() PktData
+	PreLayer() PktData
+	NextLayer() PktData
 	GetPayload() []byte
 	GetTimestamp() time.Time
 }
@@ -309,15 +310,22 @@ type EtherFrame struct {
 	EtherHeader
 	Buffer    []byte
 	Timestamp time.Time
+	nextLayer *IPv4Packet
 }
 
 func (frm *EtherFrame) Release() {
+	frm.nextLayer = nil
+
 	etherFrmPool.Put(frm)
 	payloadPool.Put(frm.Buffer)
 }
 
-func (frm *EtherFrame) GetParent() PktData {
+func (frm *EtherFrame) PreLayer() PktData {
 	return nil
+}
+
+func (frm *EtherFrame) NextLayer() PktData {
+	return frm.nextLayer
 }
 
 func (frm *EtherFrame) GetPayload() []byte {
@@ -334,75 +342,105 @@ func (frm *EtherFrame) GetTimestamp() time.Time {
 
 type IPv4Packet struct {
 	IPv4Header
-	parent *EtherFrame
+	preLayer  *EtherFrame
+	nextLayer PktData
 }
 
 func (pkt *IPv4Packet) Release() {
-	ipv4PktPool.Put(pkt)
+	pkt.nextLayer = nil
 
-	if pkt.parent != nil {
-		pkt.parent.Release()
+	if pkt.preLayer != nil {
+		pkt.preLayer.Release()
+		pkt.preLayer = nil
 	}
+
+	ipv4PktPool.Put(pkt)
 }
 
-func (pkt *IPv4Packet) GetParent() PktData {
-	return pkt.parent
+func (pkt *IPv4Packet) PreLayer() PktData {
+	return pkt.preLayer
+}
+
+func (pkt *IPv4Packet) NextLayer() PktData {
+	return pkt.nextLayer
 }
 
 func (pkt *IPv4Packet) GetPayload() []byte {
-	if pkt.parent == nil {
+	if pkt.preLayer == nil {
 		panic(errors.WithStack(ErrUnInitializedParent))
 	}
 
-	return pkt.parent.GetPayload()[pkt.PayloadOffset():]
+	return pkt.preLayer.GetPayload()[pkt.PayloadOffset():]
 }
 
 func (pkt *IPv4Packet) GetTimestamp() time.Time {
-	return pkt.parent.GetTimestamp()
+	return pkt.preLayer.GetTimestamp()
 }
 
 type TCPSegment struct {
 	TCPHeader
-	parent *IPv4Packet
+	preLayer  *IPv4Packet
+	nextLayer PktData
 }
 
 func (seg *TCPSegment) Release() {
+	seg.nextLayer = nil
+
+	if seg.preLayer != nil {
+		seg.preLayer.Release()
+		seg.preLayer = nil
+	}
+
 	tcpSegPool.Put(seg)
-	seg.parent.Release()
 }
 
-func (seg *TCPSegment) GetParent() PktData {
-	return seg.parent
+func (seg *TCPSegment) PreLayer() PktData {
+	return seg.preLayer
+}
+
+func (seg *TCPSegment) NextLayer() PktData {
+	return seg.nextLayer
 }
 
 func (seg *TCPSegment) GetPayload() []byte {
-	return seg.parent.GetPayload()[seg.PayloadOffset():]
+	return seg.preLayer.GetPayload()[seg.PayloadOffset():]
 }
 
 func (seg *TCPSegment) GetTimestamp() time.Time {
-	return seg.parent.GetTimestamp()
+	return seg.preLayer.GetTimestamp()
 }
 
 type UDPSegment struct {
 	UDPHeader
-	parent *IPv4Packet
+	preLayer  *IPv4Packet
+	nextLayer PktData
 }
 
 func (seg *UDPSegment) Release() {
+	seg.nextLayer = nil
+
+	if seg.preLayer != nil {
+		seg.preLayer.Release()
+		seg.preLayer = nil
+	}
+
 	udpSegPool.Put(seg)
-	seg.parent.Release()
 }
 
-func (seg *UDPSegment) GetParent() PktData {
-	return seg.parent
+func (seg *UDPSegment) PreLayer() PktData {
+	return seg.preLayer
+}
+
+func (seg *UDPSegment) NextLayer() PktData {
+	return seg.nextLayer
 }
 
 func (seg *UDPSegment) GetPayload() []byte {
-	return seg.parent.GetPayload()[seg.PayloadOffset():]
+	return seg.preLayer.GetPayload()[seg.PayloadOffset():]
 }
 
 func (seg *UDPSegment) GetTimestamp() time.Time {
-	return seg.parent.GetTimestamp()
+	return seg.preLayer.GetTimestamp()
 }
 
 var (
@@ -428,18 +466,19 @@ func CreateEtherFrame() *EtherFrame {
 
 func CreateIPv4Packet(frm *EtherFrame) *IPv4Packet {
 	pkt := ipv4PktPool.Get().(*IPv4Packet)
-	pkt.parent = frm
+	pkt.preLayer = frm
+	frm.nextLayer = pkt
 	return pkt
 }
 
 func CreateTCPSegment(pkt *IPv4Packet) *TCPSegment {
 	seg := tcpSegPool.Get().(*TCPSegment)
-	seg.parent = pkt
+	seg.preLayer = pkt
 	return seg
 }
 
 func CreateUDPSegment(pkt *IPv4Packet) *UDPSegment {
 	seg := udpSegPool.Get().(*UDPSegment)
-	seg.parent = pkt
+	seg.preLayer = pkt
 	return seg
 }

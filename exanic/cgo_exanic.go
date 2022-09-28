@@ -18,7 +18,9 @@ package exanic
 import "C"
 import (
 	"context"
+	"io"
 	"log"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +33,7 @@ import (
 
 const (
 	defaultPktBufferLen = 100
+	defaultTCPBufferLen = 1024 * 1024
 )
 
 type Device struct {
@@ -185,11 +188,14 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 	}()
 
 	var (
-		// sessionCache = make(map[uint64][]byte)
-		segment pkt4go.PktData
-		err     error
-		// srcIP, dstIP     pkt4go.IPv4Addr
-		// srcPort, dstPort pkt4go.Port
+		segment        pkt4go.PktData
+		err            error
+		flowHash       uint64
+		sessionBuffers = make(map[uint64][]byte)
+		buffer         []byte
+		bufferExist    bool
+		src, dst       net.Addr
+		usedSize       int
 	)
 
 	for {
@@ -204,27 +210,102 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 			switch pkt.Protocol {
 			case pkt4go.TCP:
 				tcp := pkt4go.CreateTCPSegment(pkt)
-				segment = tcp
 
 				if err = tcp.Unpack(pkt.GetPayload()); err != nil {
 					log.Printf("unpack tcp header failed: %v", err)
+
 					goto RELEASE
+				}
+
+				segment = tcp
+				flowHash = tcp.Flow().FastHash()
+
+				if tcp.Flags.HasFlag(pkt4go.SYN | pkt4go.ACK) {
+					sessionBuffers[flowHash] = make([]byte, 0, defaultTCPBufferLen)
+					goto RELEASE
+				}
+
+				if tcp.Flags.HasFlag(pkt4go.FIN | pkt4go.ACK) {
+					delete(sessionBuffers, flowHash)
+					goto RELEASE
+				}
+
+				payload := tcp.GetPayload()
+
+				if len(payload) <= 0 {
+					goto RELEASE
+				}
+
+				if buffer, bufferExist = sessionBuffers[flowHash]; !bufferExist {
+					goto RELEASE
+				}
+
+				buffer = append(buffer, payload...)
+
+				src = &net.TCPAddr{
+					IP: net.IPv4(
+						pkt.SrcAddr[0], pkt.SrcAddr[1],
+						pkt.SrcAddr[2], pkt.SrcAddr[3],
+					),
+					Port: int(tcp.SrcPort),
+				}
+				dst = &net.TCPAddr{
+					IP: net.IPv4(
+						pkt.DstAddr[0], pkt.DstAddr[1],
+						pkt.DstAddr[2], pkt.DstAddr[3],
+					),
+					Port: int(tcp.DstPort),
 				}
 			case pkt4go.UDP:
 				udp := pkt4go.CreateUDPSegment(pkt)
-				segment = udp
 
 				if err = udp.Unpack(pkt.GetPayload()); err != nil {
 					log.Printf("unpack udp header failed: %v", err)
+
 					goto RELEASE
+				}
+
+				segment = udp
+				flowHash = udp.Flow().FastHash()
+
+				if buffer, bufferExist = sessionBuffers[flowHash]; bufferExist {
+					buffer = append(buffer, segment.GetPayload()...)
+				} else {
+					buffer = segment.GetPayload()
+				}
+
+				src = &net.TCPAddr{
+					IP: net.IPv4(
+						pkt.SrcAddr[0], pkt.SrcAddr[1],
+						pkt.SrcAddr[2], pkt.SrcAddr[3],
+					),
+					Port: int(udp.SrcPort),
+				}
+				dst = &net.TCPAddr{
+					IP: net.IPv4(
+						pkt.DstAddr[0], pkt.DstAddr[1],
+						pkt.DstAddr[2], pkt.DstAddr[3],
+					),
+					Port: int(udp.DstPort),
 				}
 			default:
 				log.Printf("unsuppored transport: %x", pkt.Protocol)
-				pkt.Release()
-				continue
+
+				goto RELEASE
 			}
 
-			// fn(pkg.src, pkg.dst, pkg.payload)
+			usedSize, err = fn(src, dst, segment.GetTimestamp(), buffer)
+
+			if err != nil {
+				if err == io.EOF {
+					segment.Release()
+					return nil
+				}
+
+				log.Printf("payload handler error: %v", err)
+			} else if len(buffer) > usedSize {
+				sessionBuffers[flowHash] = buffer[usedSize:]
+			}
 
 		RELEASE:
 			segment.Release()

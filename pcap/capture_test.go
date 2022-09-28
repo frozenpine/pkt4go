@@ -18,9 +18,9 @@ func TestCaputureTime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	smdpHandler := func(src, dst net.Addr, data []byte) (int, error) {
+	smdpHandler := func(src, dst net.Addr, ts time.Time, data []byte) (int, error) {
 
-		t.Logf("%s -> %s: %d", src, dst, len(data))
+		t.Logf("%s %s -> %s: %d", ts, src, dst, len(data))
 		return len(data), nil
 	}
 

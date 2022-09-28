@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/frozenpine/pkt4go/exanic"
 )
@@ -23,8 +24,8 @@ func init() {
 	flag.StringVar(&source, "src", source, "Capture device")
 }
 
-func handler(src, dst net.Addr, payload []byte) (int, error) {
-	log.Println(src, dst, payload)
+func handler(src, dst net.Addr, ts time.Time, payload []byte) (int, error) {
+	log.Println(ts, src, dst, payload)
 
 	return len(payload), nil
 }

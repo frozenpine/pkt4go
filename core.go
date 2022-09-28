@@ -4,8 +4,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"reflect"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/pkg/errors"
 
@@ -13,7 +15,7 @@ import (
 )
 
 // DataHandler transport payload handler
-type DataHandler func(src, dst net.Addr, data []byte) (int, error)
+type DataHandler func(src, dst net.Addr, ts time.Time, data []byte) (int, error)
 
 var (
 	EtherHeaderSize    = binary.Size(EtherHeader{})
@@ -377,6 +379,40 @@ func (pkt *IPv4Packet) GetTimestamp() time.Time {
 	return pkt.preLayer.GetTimestamp()
 }
 
+type Session struct {
+	Protocol TransProto
+	SrcAddr  IPv4Addr
+	SrcPort  uint16
+	DstAddr  IPv4Addr
+	DstPort  uint16
+}
+
+const (
+	fnvBasis = 14695981039346656037
+	fnvPrime = 1099511628211
+)
+
+func (s *Session) FastHash() (h uint64) {
+	size := int(unsafe.Sizeof(*s))
+
+	rawBytes := *(*[]byte)(unsafe.Pointer(
+		&reflect.SliceHeader{
+			Data: uintptr(unsafe.Pointer(s)),
+			Len:  size,
+			Cap:  size,
+		},
+	))
+
+	h = fnvBasis
+
+	for i := 0; i < len(rawBytes); i++ {
+		h ^= uint64(rawBytes[i])
+		h *= fnvPrime
+	}
+
+	return
+}
+
 type TCPSegment struct {
 	TCPHeader
 	preLayer  *IPv4Packet
@@ -410,6 +446,18 @@ func (seg *TCPSegment) GetTimestamp() time.Time {
 	return seg.preLayer.GetTimestamp()
 }
 
+func (seg *TCPSegment) Flow() *Session {
+	ih := seg.preLayer
+
+	return &Session{
+		Protocol: TCP,
+		SrcAddr:  ih.SrcAddr,
+		SrcPort:  seg.SrcPort,
+		DstAddr:  ih.DstAddr,
+		DstPort:  seg.DstPort,
+	}
+}
+
 type UDPSegment struct {
 	UDPHeader
 	preLayer  *IPv4Packet
@@ -441,6 +489,18 @@ func (seg *UDPSegment) GetPayload() []byte {
 
 func (seg *UDPSegment) GetTimestamp() time.Time {
 	return seg.preLayer.GetTimestamp()
+}
+
+func (seg *UDPSegment) Flow() *Session {
+	ih := seg.preLayer
+
+	return &Session{
+		Protocol: UDP,
+		SrcAddr:  ih.SrcAddr,
+		SrcPort:  seg.SrcPort,
+		DstAddr:  ih.DstAddr,
+		DstPort:  seg.DstPort,
+	}
 }
 
 var (

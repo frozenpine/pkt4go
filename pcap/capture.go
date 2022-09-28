@@ -153,12 +153,15 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 				flowHash = udp.TransportFlow().FastHash()
 				if buffer, bufferExist = sessionBuffers[flowHash]; bufferExist {
 					buffer = append(buffer, udp.Payload...)
+				} else {
+					buffer = udp.Payload
 				}
 			default:
 				log.Println("unsupported Transport Layer: " + ip.NextLayerType().String())
 			}
 
-			usedSize, err = fn(src, dst, buffer)
+			// TODO: get real timestamp
+			usedSize, err = fn(src, dst, time.Now(), buffer)
 
 			if err != nil {
 				if err == io.EOF {

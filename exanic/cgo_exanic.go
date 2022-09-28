@@ -181,8 +181,6 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 				continue
 			}
 
-			// TODO: 排查可能的oom kill
-
 			pktCh <- pkt
 		}
 	}()

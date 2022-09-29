@@ -160,8 +160,7 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 				log.Println("unsupported Transport Layer: " + ip.NextLayerType().String())
 			}
 
-			// TODO: get real timestamp
-			usedSize, err = fn(src, dst, time.Now(), buffer)
+			usedSize, err = fn(src, dst, pkg.Metadata().Timestamp, buffer)
 
 			if err != nil {
 				if err == io.EOF {

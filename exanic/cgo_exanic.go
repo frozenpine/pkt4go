@@ -125,12 +125,6 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 			var timestamp C.exanic_cycles32_t
 			var tsps C.struct_timespec
 
-			// size := C.exanic_receive_frame(
-			// 	rx,
-			// 	(*C.char)(cBuffer),
-			// 	C.size_t(cBufferLen),
-			// 	&timestamp,
-			// )
 			size := C.exanic_receive_frame(
 				rx,
 				(*C.char)(unsafe.Pointer(&frm.Buffer[0])),

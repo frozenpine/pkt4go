@@ -15,13 +15,19 @@ import (
 )
 
 var (
-	source = "exanic0:0"
+	source = ""
+	iface  = ""
+	dryRun = false
 )
 
 func init() {
 	log.SetFlags(log.Flags() | log.Lmicroseconds)
 
-	flag.StringVar(&source, "src", source, "Capture device")
+	flag.StringVar(&source, "src", "", "Capture device.")
+	flag.StringVar(&iface, "iface", "", "Interface name.")
+	flag.BoolVar(&dryRun, "dry", false, "Dry run without real capture.")
+
+	flag.Parse()
 }
 
 func handler(src, dst net.Addr, ts time.Time, payload []byte) (int, error) {
@@ -31,10 +37,29 @@ func handler(src, dst net.Addr, ts time.Time, payload []byte) (int, error) {
 }
 
 func main() {
-	device, err := exanic.CreateHandler(source)
+	var (
+		device *exanic.Device
+		err    error
+	)
+
+	if !flag.Parsed() {
+		flag.Parse()
+	}
+
+	if source != "" {
+		device, err = exanic.CreateHandler(source)
+	} else if iface != "" {
+		device, err = exanic.GetHandlerByIfaceName(iface)
+	} else {
+		log.Fatalln("no device or iface specified.")
+	}
 
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	if dryRun {
+		return
 	}
 
 	ctx, _ := signal.NotifyContext(

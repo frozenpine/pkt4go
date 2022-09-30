@@ -13,16 +13,18 @@ package exanic
 #include <exanic/fifo_rx.h>
 #include <exanic/filter.h>
 #include <exanic/time.h>
-#include "exanic_version.h"
+#include <exanic/config.h>
 */
 import "C"
 import (
+	"bytes"
 	"context"
 	"io"
 	"log"
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -41,6 +43,42 @@ type Device struct {
 	port    int
 }
 
+func createHandler(name string, port int) (*Device, error) {
+	dev := Device{port: port}
+
+	dev.handler = C.exanic_acquire_handle(C.CString(name))
+
+	if dev.handler == nil {
+		return nil, errors.New("acquire handler failed: " + name)
+	}
+
+	return &dev, nil
+}
+
+func GetHandlerByIfaceName(iface string) (*Device, error) {
+	if iface == "" {
+		return nil, errors.New("iface name can not be empty")
+	}
+
+	deviceBuff := make([]byte, 50)
+	port := 0
+	var rtn C.int
+
+	if rtn = C.exanic_find_port_by_interface_name(
+		C.CString(iface),
+		(*C.char)(unsafe.Pointer(&deviceBuff[0])),
+		C.size_t(len(deviceBuff)), (*C.int)(unsafe.Pointer(&port)),
+	); rtn != 0 {
+		return nil, errors.New("no device found by name: " + iface)
+	}
+
+	dev := string(deviceBuff[:bytes.IndexByte(deviceBuff, 0x0)])
+
+	log.Printf("iface[%s] info: %s:%d", iface, dev, port)
+
+	return createHandler(dev, port)
+}
+
 func CreateHandler(src string) (*Device, error) {
 	if src == "" {
 		return nil, errors.New("device can not be empty")
@@ -52,21 +90,12 @@ func CreateHandler(src string) (*Device, error) {
 		return nil, errors.New("invalid device string: " + src)
 	}
 
-	var dev Device
-	var err error
-
-	dev.port, err = strconv.Atoi(devData[1])
+	port, err := strconv.Atoi(devData[1])
 	if err != nil {
 		return nil, errors.Wrap(err, "invalid port num")
 	}
 
-	dev.handler = C.exanic_acquire_handle(C.CString(devData[0]))
-
-	if dev.handler == nil {
-		return nil, errors.New("acquire handler failed: " + devData[0])
-	}
-
-	return &dev, nil
+	return createHandler(devData[0], port)
 }
 
 func createFilter(input string) *C.exanic_ip_filter_t {
@@ -114,9 +143,14 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 
 	pktCh := make(chan *pkt4go.IPv4Packet, defaultPktBufferLen)
 
+	done := sync.WaitGroup{}
+
+	done.Add(1)
 	go func() {
 		defer func() {
 			close(pktCh)
+
+			done.Done()
 		}()
 
 		for {
@@ -190,13 +224,14 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 		usedSize       int
 	)
 
+RUN:
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			break RUN
 		case pkt := <-pktCh:
 			if pkt == nil {
-				return nil
+				break RUN
 			}
 
 			switch pkt.Protocol {
@@ -303,4 +338,8 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 			segment.Release()
 		}
 	}
+
+	done.Wait()
+
+	return nil
 }

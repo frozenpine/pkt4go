@@ -138,12 +138,8 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 		rx = C.exanic_acquire_rx_buffer(dev.handler, C.int(dev.port), 0)
 	}
 
-	// cBufferLen := pkt4go.GetMTU()
-	// cBuffer := C.malloc(C.size_t(cBufferLen))
-
 	defer func() {
 		C.exanic_release_rx_buffer(rx)
-		// C.free(cBuffer)
 	}()
 
 	pktCh := make(chan *pkt4go.IPv4Packet, defaultPktBufferLen)

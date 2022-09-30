@@ -34,7 +34,14 @@ func init() {
 }
 
 func handler(src, dst net.Addr, ts time.Time, payload []byte) (int, error) {
-	log.Println(ts, src, dst, payload)
+	switch dst.Network() {
+	case "tcp":
+		log.Printf("[TCP] %s %s -> %s: payload %d bytes", ts, src, dst, len(payload))
+	case "udp":
+		log.Printf("[UDP] %s %s -> %s: payload %d bytes", ts, src, dst, len(payload))
+	default:
+		log.Printf("%s %s -> %s: payload %d bytes", ts, src, dst, len(payload))
+	}
 
 	return len(payload), nil
 }

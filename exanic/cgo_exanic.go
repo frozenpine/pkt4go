@@ -159,62 +159,67 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 		}()
 
 		for {
-			frm := pkt4go.CreateEtherFrame()
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				frm := pkt4go.CreateEtherFrame()
 
-			var timestamp C.exanic_cycles32_t
-			var tsps C.struct_timespec
+				var timestamp C.exanic_cycles32_t
+				var tsps C.struct_timespec
 
-			size := C.exanic_receive_frame(
-				rx,
-				(*C.char)(unsafe.Pointer(&frm.Buffer[0])),
-				C.size_t(len(frm.Buffer)),
-				&timestamp,
-			)
+				size := C.exanic_receive_frame(
+					rx,
+					(*C.char)(unsafe.Pointer(&frm.Buffer[0])),
+					C.size_t(len(frm.Buffer)),
+					&timestamp,
+				)
 
-			if size <= 0 {
-				frm.Release()
-				continue
+				if size <= 0 {
+					frm.Release()
+					continue
+				}
+
+				/*
+					NOTE:
+					sync host time / PPS to exanic first, to correct UNIX epoch
+
+					REF:
+					https://exablaze.com/docs/exanic/user-guide/clock-sync/
+
+					EXAMPLE:
+					# exanic-clock-sync exanic0:host
+				*/
+				expandTs := C.exanic_expand_timestamp(dev.handler, timestamp)
+				C.exanic_cycles_to_timespec(dev.handler, expandTs, &tsps)
+				frm.Timestamp = time.Unix(
+					int64(tsps.tv_sec), int64(tsps.tv_nsec),
+				)
+				// frm.Buffer = C.GoBytes(cBuffer, C.int(size))
+				frm.Buffer = frm.Buffer[:size]
+
+				if err := frm.Unpack(frm.Buffer); err != nil {
+					log.Printf("unpack eth header failed: %v", err)
+					log.Printf("%+v", frm)
+					frm.Release()
+					continue
+				} else if frm.Type != pkt4go.ProtoIP {
+					log.Printf("%s received ether frame[%04x]: %s -> %s", frm.Timestamp, frm.Type, frm.SrcHost, frm.DstHost)
+					frm.Release()
+					continue
+				}
+
+				pkt := pkt4go.CreateIPv4Packet(frm)
+
+				if err := pkt.Unpack(frm.GetPayload()); err != nil {
+					log.Printf("unpack ip header failed: %v", err)
+					log.Printf("%+v", frm)
+					pkt.Release()
+					continue
+				}
+
+				pktCh <- pkt
 			}
-
-			/*
-				NOTE:
-				sync host time / PPS to exanic first, to correct UNIX epoch
-
-				REF:
-				https://exablaze.com/docs/exanic/user-guide/clock-sync/
-
-				EXAMPLE:
-				# exanic-clock-sync exanic0:host
-			*/
-			expandTs := C.exanic_expand_timestamp(dev.handler, timestamp)
-			C.exanic_cycles_to_timespec(dev.handler, expandTs, &tsps)
-			frm.Timestamp = time.Unix(
-				int64(tsps.tv_sec), int64(tsps.tv_nsec),
-			)
-			// frm.Buffer = C.GoBytes(cBuffer, C.int(size))
-			frm.Buffer = frm.Buffer[:size]
-
-			if err := frm.Unpack(frm.Buffer); err != nil {
-				log.Printf("unpack eth header failed: %v", err)
-				log.Printf("%+v", frm)
-				frm.Release()
-				continue
-			} else if frm.Type != pkt4go.ProtoIP {
-				log.Printf("%s received ether frame[%04x]: %s -> %s", frm.Timestamp, frm.Type, frm.SrcHost, frm.DstHost)
-				frm.Release()
-				continue
-			}
-
-			pkt := pkt4go.CreateIPv4Packet(frm)
-
-			if err := pkt.Unpack(frm.GetPayload()); err != nil {
-				log.Printf("unpack ip header failed: %v", err)
-				log.Printf("%+v", frm)
-				pkt.Release()
-				continue
-			}
-
-			pktCh <- pkt
 		}
 	}()
 
@@ -306,14 +311,14 @@ RUN:
 					buffer = segment.GetPayload()
 				}
 
-				src = &net.TCPAddr{
+				src = &net.UDPAddr{
 					IP: net.IPv4(
 						pkt.SrcAddr[0], pkt.SrcAddr[1],
 						pkt.SrcAddr[2], pkt.SrcAddr[3],
 					),
 					Port: int(udp.SrcPort),
 				}
-				dst = &net.TCPAddr{
+				dst = &net.UDPAddr{
 					IP: net.IPv4(
 						pkt.DstAddr[0], pkt.DstAddr[1],
 						pkt.DstAddr[2], pkt.DstAddr[3],

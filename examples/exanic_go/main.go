@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -15,9 +16,10 @@ import (
 )
 
 var (
-	source = ""
-	iface  = ""
-	dryRun = false
+	source      = ""
+	iface       = ""
+	dryRun      = false
+	showVersion = false
 )
 
 func init() {
@@ -26,6 +28,7 @@ func init() {
 	flag.StringVar(&source, "src", "", "Capture device.")
 	flag.StringVar(&iface, "iface", "", "Interface name.")
 	flag.BoolVar(&dryRun, "dry", false, "Dry run without real capture.")
+	flag.BoolVar(&showVersion, "ver", false, "Get exanic version.")
 
 	flag.Parse()
 }
@@ -44,6 +47,11 @@ func main() {
 
 	if !flag.Parsed() {
 		flag.Parse()
+	}
+
+	if showVersion {
+		fmt.Println(exanic.GetVersion())
+		return
 	}
 
 	if source != "" {

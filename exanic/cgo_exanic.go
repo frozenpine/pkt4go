@@ -9,6 +9,7 @@ package exanic
 #include <stdint.h>
 #include <stdlib.h>
 
+#include "exanic_version.h"
 #include <exanic/exanic.h>
 #include <exanic/fifo_rx.h>
 #include <exanic/filter.h>
@@ -41,6 +42,10 @@ const (
 type Device struct {
 	handler *C.exanic_t
 	port    int
+}
+
+func GetVersion() string {
+	return "exanic: " + C.EXANIC_VERSION_TEXT
 }
 
 func createHandler(name string, port int) (*Device, error) {

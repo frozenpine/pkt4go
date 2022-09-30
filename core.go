@@ -69,7 +69,7 @@ func (hdr *EtherFrame) Unpack(buff []byte) error {
 
 	offset += copy(hdr.SrcHost[:], buff[offset:])
 
-	hdr.Type = EtherType(ntohs(buff, &offset))
+	hdr.Type = EtherType(N2HShort(buff, &offset))
 
 	if offset != EtherHeaderSize {
 		panic(errors.Wrap(
@@ -134,21 +134,21 @@ func (hdr *IPv4Header) Unpack(buff []byte) error {
 
 	offset := 0
 
-	hdr.VerIHL = nbyte(buff, &offset)
+	hdr.VerIHL = NByte(buff, &offset)
 
-	hdr.TOS = nbyte(buff, &offset)
+	hdr.TOS = NByte(buff, &offset)
 
-	hdr.TotalLength = ntohs(buff, &offset)
+	hdr.TotalLength = N2HShort(buff, &offset)
 
-	hdr.Identification = ntohs(buff, &offset)
+	hdr.Identification = N2HShort(buff, &offset)
 
-	hdr.Flags = ntohs(buff, &offset)
+	hdr.Flags = N2HShort(buff, &offset)
 
-	hdr.TTL = nbyte(buff, &offset)
+	hdr.TTL = NByte(buff, &offset)
 
-	hdr.Protocol = TransProto(nbyte(buff, &offset))
+	hdr.Protocol = TransProto(NByte(buff, &offset))
 
-	hdr.CRC = ntohs(buff, &offset)
+	hdr.CRC = N2HShort(buff, &offset)
 
 	offset += copy(hdr.SrcAddr[:], buff[offset:])
 	offset += copy(hdr.DstAddr[:], buff[offset:])
@@ -223,21 +223,21 @@ func (hdr *TCPHeader) Unpack(buff []byte) error {
 
 	offset := 0
 
-	hdr.SrcPort = ntohs(buff, &offset)
+	hdr.SrcPort = N2HShort(buff, &offset)
 
-	hdr.DstPort = ntohs(buff, &offset)
+	hdr.DstPort = N2HShort(buff, &offset)
 
-	hdr.Seq = TCPSeq(ntohl(buff, &offset))
+	hdr.Seq = TCPSeq(N2HLong(buff, &offset))
 
-	hdr.Ack = TCPSeq(ntohl(buff, &offset))
+	hdr.Ack = TCPSeq(N2HLong(buff, &offset))
 
-	hdr.Offset = TCPOffset(nbyte(buff, &offset))
+	hdr.Offset = TCPOffset(NByte(buff, &offset))
 
-	hdr.Flags = TCPFlags(nbyte(buff, &offset))
+	hdr.Flags = TCPFlags(NByte(buff, &offset))
 
-	hdr.Window = ntohs(buff, &offset)
+	hdr.Window = N2HShort(buff, &offset)
 
-	hdr.Checksum = ntohs(buff, &offset)
+	hdr.Checksum = N2HShort(buff, &offset)
 
 	if offset != TCPHeaderBaseSize {
 		panic(errors.Wrap(
@@ -275,13 +275,13 @@ func (hdr *UDPHeader) Unpack(buff []byte) error {
 
 	offset := 0
 
-	hdr.SrcPort = ntohs(buff, &offset)
+	hdr.SrcPort = N2HShort(buff, &offset)
 
-	hdr.DstPort = ntohs(buff, &offset)
+	hdr.DstPort = N2HShort(buff, &offset)
 
-	hdr.Len = ntohs(buff, &offset)
+	hdr.Len = N2HShort(buff, &offset)
 
-	hdr.CRC = ntohs(buff, &offset)
+	hdr.CRC = N2HShort(buff, &offset)
 
 	if offset != UDPHeaderSize {
 		panic(errors.Wrap(

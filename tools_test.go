@@ -7,19 +7,19 @@ func TestOffset(t *testing.T) {
 
 	buffer := []byte{0, 1, 2, 3, 4, 5, 6}
 
-	nbyte(buffer, &offset)
+	NByte(buffer, &offset)
 
 	if offset != 1 {
 		t.Fatal("nbyte error")
 	}
 
-	ntohs(buffer, &offset)
+	N2HShort(buffer, &offset)
 
 	if offset != 3 {
 		t.Fatal("ntoh error")
 	}
 
-	ntohl(buffer, &offset)
+	N2HLong(buffer, &offset)
 
 	if offset != 7 {
 		t.Fatal("ntohl error")

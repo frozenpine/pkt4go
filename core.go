@@ -43,8 +43,11 @@ func (addr MACAddr) String() string {
 
 type EtherType uint16
 
+//go:generate stringer -type EtherType -linecomment
 const (
 	ProtoIP EtherType = 0x0800 // ip
+	ProtoARP EtherType = 0x0806 // arp
+	ProtoRARP EtherType = 0x0835 // rarp
 )
 
 // EtherHeader ethernet header

@@ -2,6 +2,8 @@ package pkt4go
 
 import (
 	"encoding/binary"
+
+	"github.com/pkg/errors"
 )
 
 func NByte(buffer []byte, offset *int) uint8 {
@@ -26,4 +28,14 @@ func N2HLong(buffer []byte, offset *int) uint32 {
 	(*offset) += 4
 
 	return result
+}
+
+func ReadBytes(dst []byte, buffer []byte, offset *int) error {
+	if len(buffer) < len(dst) {
+		return errors.New("insufficient data length")
+	}
+
+	*offset += copy(dst, buffer)
+
+	return nil
 }

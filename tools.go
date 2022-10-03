@@ -2,6 +2,7 @@ package pkt4go
 
 import (
 	"encoding/binary"
+	"math"
 
 	"github.com/pkg/errors"
 )
@@ -38,4 +39,13 @@ func ReadBytes(dst []byte, buffer []byte, offset *int) error {
 	*offset += copy(dst, buffer)
 
 	return nil
+}
+
+func N2HDouble(buffer []byte, offset *int) float64 {
+	bits := binary.BigEndian.Uint64(buffer)
+	result := math.Float64frombits(bits)
+
+	*offset += 8
+
+	return result
 }

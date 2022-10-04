@@ -1,6 +1,7 @@
 package pkt4go
 
 import (
+	"bytes"
 	"encoding/binary"
 	"math"
 
@@ -48,4 +49,18 @@ func N2HDouble(buffer []byte, offset *int) float64 {
 	*offset += 8
 
 	return result
+}
+
+func findCStrTerm(in []byte) (idx int) {
+	idx = bytes.IndexByte(in, 0x0)
+
+	if idx < 0 {
+		idx = 0
+	}
+
+	return
+}
+
+func CStr2GoStr(in []byte) string {
+	return string(in[:findCStrTerm(in)])
 }

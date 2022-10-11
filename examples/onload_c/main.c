@@ -85,6 +85,10 @@ int main()
         goto RELEASE_VI;
     }
 
+    if (ef_memreg_alloc(&memreg, dh, &pd, dh, p, alloc_size) < 0)
+    {
+    }
+
 RELEASE_VI:
     ef_vi_free(&vi, dh);
 

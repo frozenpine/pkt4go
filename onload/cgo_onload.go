@@ -4,7 +4,7 @@ package onload
 
 /*
 #cgo CFLAGS: -I./include
-#cgo LDFLAGS: -L./lib -lciul1
+#cgo LDFLAGS: -L./libs -lciul1
 
 #include <stdint.h>
 #include <stdlib.h>

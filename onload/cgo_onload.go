@@ -211,8 +211,8 @@ func try(rtn C.int) error {
 	return nil
 }
 
-func CreateHandler(src string) (*Device, error) {
-	if src == "" {
+func CreateHandler(iface string) (*Device, error) {
+	if iface == "" {
 		return nil, errors.New("device can not be empty")
 	}
 
@@ -225,7 +225,7 @@ func CreateHandler(src string) (*Device, error) {
 	if err := try(C.ef_pd_alloc_by_name(
 		&dev.pd,
 		dev.dh,
-		C.CString(src),
+		C.CString(iface),
 		C.EF_PD_RX_PACKED_STREAM,
 	)); err != nil {
 		dev.closeDH()
@@ -237,7 +237,7 @@ func CreateHandler(src string) (*Device, error) {
 		&dev.vi, dev.dh,
 		&dev.pd, dev.dh,
 		-1, -1, -1, nil, -1,
-		defaultFlags,
+		flags,
 	)); err != nil {
 		dev.freePD()
 		dev.closeDH()

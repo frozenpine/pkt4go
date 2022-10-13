@@ -9,6 +9,8 @@ package onload
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <errno.h>
+#include <string.h>
 #include <sys/mman.h>
 
 #include <etherfabric/base.h>
@@ -17,6 +19,22 @@ package onload
 #include <etherfabric/vi.h>
 #include <etherfabric/packedstream.h>
 #include <etherfabric/memreg.h>
+
+typedef struct buf
+{
+	ef_addr ef_addr;
+	struct buf *next;
+} buf_t;
+
+static inline int get_errno()
+{
+	return errno;
+}
+
+static inline u_int64_t round_up(int p, int align)
+{
+    return ((p) + (align)-1u) & ~((align)-1u);
+}
 
 static inline int get_ef_event_poll(struct ef_vi *evq, ef_event *evs, int evs_len)
 {
@@ -36,6 +54,7 @@ static inline bool test_event_rx_ps_next_buffer(ef_event *evt)
 import "C"
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -71,11 +90,6 @@ var (
 	verbose                         = false
 )
 
-type buffer struct {
-	efAddr C.ef_addr
-	next   *buffer
-}
-
 type Device struct {
 	dh                C.ef_driver_handle
 	pd                C.struct_ef_pd
@@ -83,9 +97,9 @@ type Device struct {
 	psp               C.ef_packed_stream_params
 	memreg            C.struct_ef_memreg
 	pspStartOffset    C.int
-	currentBuffer     *buffer
-	postedBuffers     *buffer
-	postedBuffersTail **buffer
+	currentBuffer     *C.struct_buf
+	postedBuffers     *C.struct_buf
+	postedBuffersTail **C.struct_buf
 	psPktIter         *C.ef_packed_stream_packet
 	rxPkts            uint64
 	rxBytes           uint64
@@ -111,7 +125,7 @@ func (dev *Device) Release() {
 	dev.closeDH()
 }
 
-func (dev *Device) putPostedBuffer(buf *buffer) {
+func (dev *Device) putPostedBuffer(buf *C.struct_buf) {
 	buf.next = nil
 
 	*dev.postedBuffersTail = buf
@@ -119,7 +133,7 @@ func (dev *Device) putPostedBuffer(buf *buffer) {
 	dev.postedBuffersTail = &buf.next
 }
 
-func (dev *Device) getPostedBuffer() *buffer {
+func (dev *Device) getPostedBuffer() *C.struct_buf {
 	buf := dev.postedBuffers
 
 	if buf != nil {
@@ -187,6 +201,16 @@ const (
 	EF_EVENT_FLAG_CTPIO EFEventFlags = 0x1
 )
 
+func try(rtn C.int) error {
+	if rtn < 0 {
+		errno := C.get_errno()
+
+		return fmt.Errorf("rc=%d errno=%d (%s)", rtn, errno, C.GoString(C.strerror(errno)))
+	}
+
+	return nil
+}
+
 func CreateHandler(src string) (*Device, error) {
 	if src == "" {
 		return nil, errors.New("device can not be empty")
@@ -194,42 +218,69 @@ func CreateHandler(src string) (*Device, error) {
 
 	dev := Device{}
 
-	if C.ef_driver_open(&dev.dh) != 0 {
-		return nil, errors.New("driver open failed")
+	if err := try(C.ef_driver_open(&dev.dh)); err != nil {
+		return nil, errors.Wrap(err, "driver open failed")
 	}
 
-	if C.ef_pd_alloc_by_name(
+	if err := try(C.ef_pd_alloc_by_name(
 		&dev.pd,
 		dev.dh,
 		C.CString(src),
 		C.EF_PD_RX_PACKED_STREAM,
-	) != 0 {
+	)); err != nil {
 		dev.closeDH()
 
-		return nil, errors.New("alloc protect domain failed")
+		return nil, errors.Wrap(err, "alloc protect domain failed")
 	}
 
-	if C.ef_vi_alloc_from_pd(
+	if err := try(C.ef_vi_alloc_from_pd(
 		&dev.vi, dev.dh,
 		&dev.pd, dev.dh,
 		-1, -1, -1, nil, -1,
 		defaultFlags,
-	) < 0 {
+	)); err != nil {
 		dev.freePD()
 		dev.closeDH()
 
-		return nil, errors.New("alloc virtual interface faile")
+		return nil, errors.Wrap(err, "alloc virtual interface faile")
 	}
 
-	if C.ef_vi_packed_stream_get_params(&dev.vi, &dev.psp) != 0 {
+	if err := try(C.ef_vi_packed_stream_get_params(&dev.vi, &dev.psp)); err != nil {
 		dev.freeVI()
 		dev.freePD()
 		dev.closeDH()
 
-		return nil, errors.New("get packed stream params failed")
+		return nil, errors.Wrap(err, "get packed stream params failed")
+	}
+	dev.pspStartOffset = dev.psp.psp_start_offset
+
+	nBufs := dev.psp.psp_max_usable_buffers
+	if nBufs > C.ef_vi_receive_capacity(&dev.vi) {
+		return nil, errors.New("receive buffer capacity exceeded")
+	}
+	bufSize := dev.psp.psp_buffer_size
+	allocSize := C.round_up(nBufs*bufSize, C.int(hugePageSize))
+
+	p := C.mmap(nil, allocSize, C.PROT_READ|C.PROT_WRITE,
+		/*MAP_ANONYMOUS |*/ C.MAP_PRIVATE|C.MAP_HUGETLB, -1, 0)
+	if p == C.MAP_FAILED || (uintptr(p)&uintptr(dev.psp.psp_buffer_align-1)) != 0 {
+		return nil, errors.New("require mmap buffer faild")
 	}
 
-	// TODO: mmap huge page for rx cache
+	if err := try(C.ef_memreg_alloc(&dev.memreg, dev.dh, &dev.pd, dev.dh, p, allocSize)); err != nil {
+		return nil, errors.Wrap(err, "memreg alloc failed")
+	}
+
+	for idx := 0; idx < int(nBufs); idx++ {
+		buf := (*C.struct_buf)(unsafe.Pointer(uintptr(p) + uintptr(idx*int(bufSize))))
+		buf.ef_addr = C.ef_memreg_dma_addr(&dev.memreg, C.size_t(idx*int(bufSize)))
+
+		if err := try(C.ef_vi_receive_post(&dev.vi, buf.ef_addr, 0)); err != nil {
+			return nil, errors.Wrap(err, "ef_vi receive post faild")
+		}
+
+		dev.putPostedBuffer(buf)
+	}
 
 	return &dev, nil
 }
@@ -252,8 +303,8 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 	defer dev.Release()
 
 	if efviFilter := createFilter(filter); efviFilter != nil {
-		if C.ef_vi_filter_add(&dev.vi, dev.dh, efviFilter, nil) < 0 {
-			return errors.New("add filter failed")
+		if err := try(C.ef_vi_filter_add(&dev.vi, dev.dh, efviFilter, nil)); err != nil {
+			return errors.Wrap(err, "add filter failed")
 		}
 	}
 
@@ -288,8 +339,8 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 					case EF_EVENT_TYPE_RX_PACKED_STREAM:
 						if bool(C.test_event_rx_ps_next_buffer(evt)) {
 							if dev.currentBuffer != nil {
-								if rtn := int(C.ef_vi_receive_post(&dev.vi, dev.currentBuffer.efAddr, 0)); rtn < 0 {
-									err = errors.Errorf("receive data failed: rc=%d, errno=%d, (%s)", rtn)
+								if err = try(C.ef_vi_receive_post(&dev.vi, dev.currentBuffer.ef_addr, 0)); err != nil {
+									err = errors.Wrap(err, "receive data failed")
 									break CAPTURE
 								}
 

@@ -70,7 +70,7 @@ func main() {
 	}
 
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("create handler failed: %v", err)
 	}
 
 	if dryRun {

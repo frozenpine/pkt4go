@@ -8,6 +8,7 @@ package onload
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <sys/mman.h>
 
 #include <etherfabric/base.h>
@@ -22,11 +23,15 @@ static inline int get_ef_event_poll(struct ef_vi *evq, ef_event *evs, int evs_le
     return ef_eventq_poll(evq, evs, evs_len);
 }
 
-static inline u_int16_t get_ef_event_type(ef_event evt)
+static inline u_int16_t get_ef_event_type(ef_event *evt)
 {
-    return EF_EVENT_TYPE(evt);
+    return EF_EVENT_TYPE(*evt);
 }
 
+static inline bool test_event_rx_ps_next_buffer(ef_event *evt)
+{
+    return EF_EVENT_RX_PS_NEXT_BUFFER(*evt) == EF_EVENT_FLAG_PS_NEXT_BUFFER;
+}
 */
 import "C"
 import (
@@ -47,10 +52,11 @@ func GetInterfaceVersion() string {
 }
 
 const (
-	defaultFlags        C.enum_ef_vi_flags = C.EF_VI_RX_PACKED_STREAM | C.EF_VI_RX_PS_BUF_SIZE_64K | C.EF_VI_RX_TIMESTAMPS
-	defaultHugePageSize int64              = 2 * 1024 * 1024
-	defaultPktBufferLen                    = 100
-	maxEvents                              = 16
+	defaultFlags C.enum_ef_vi_flags = C.EF_VI_RX_PACKED_STREAM | C.EF_VI_RX_PS_BUF_SIZE_64K | C.EF_VI_RX_TIMESTAMPS
+	// maxEvents * EF_VI_RX_PS_BUF_SIZE_64K * 2
+	defaultHugePageSize int64 = 2 * 16 * 64 * 1024
+	defaultPktBufferLen       = 100
+	maxEvents                 = 16
 )
 
 var (
@@ -58,12 +64,23 @@ var (
 	hugePageSize int64              = defaultHugePageSize
 )
 
+type buffer struct {
+	efAddr C.ef_addr
+	next   *buffer
+}
+
 type Device struct {
-	dh     C.ef_driver_handle
-	pd     C.struct_ef_pd
-	vi     C.struct_ef_vi
-	psp    C.ef_packed_stream_params
-	memreg C.struct_ef_memreg
+	dh                C.ef_driver_handle
+	pd                C.struct_ef_pd
+	vi                C.struct_ef_vi
+	psp               C.ef_packed_stream_params
+	memreg            C.struct_ef_memreg
+	currentBuffer     *buffer
+	postedBuffers     *buffer
+	postedBuffersTail **buffer
+	// psPktIter         *C.ef_packed_stream_packet
+	rxPkts  uint64
+	rxBytes uint64
 }
 
 func (dev *Device) closeDH() {
@@ -116,6 +133,28 @@ const (
 	EF_EVENT_TYPE_RX_MULTI_DISCARD
 	// Event queue has been forcibly halted (hotplug, reset, etc.)
 	EF_EVENT_TYPE_RESET
+)
+
+// EFEventFlags event flags
+type EFEventFlags uint16
+
+const (
+	/* RX-event flags. */
+
+	// Start Of Packet flag
+	EF_EVENT_FLAG_SOP EFEventFlags = 0x1 << iota
+	// CONTinuation Of Packet flag
+	EF_EVENT_FLAG_CONT
+	// iSCSI CRC validated OK flag
+	EF_EVENT_FLAG_ISCSI_OK
+	// Multicast flag
+	EF_EVENT_FLAG_MULTICAST
+	// Packed Stream Next Buffer flag
+	EF_EVENT_FLAG_PS_NEXT_BUFFER
+
+	/* TX-event flags. */
+	// Packets were sent successfully with CTPIO
+	EF_EVENT_FLAG_CTPIO EFEventFlags = 0x1
 )
 
 func CreateHandler(src string) (*Device, error) {
@@ -173,13 +212,6 @@ func createFilter(input string) *C.ef_filter_spec {
 	return &filter
 }
 
-// func getEventType(evt C.ef_event) EFEventType {
-// 	evtType := (EFEventType(evt[0]) << 8)
-// 	evtType |= EFEventType(evt[1])
-
-// 	return evtType
-// }
-
 func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.DataHandler) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -206,6 +238,7 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 		}()
 
 		events := [maxEvents]C.ef_event{}
+		currentBuffer := C.buf{}
 
 		for {
 			select {
@@ -216,9 +249,14 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 				evtCount := int(C.get_ef_event_poll(&dev.vi, (*C.ef_event)(unsafe.Pointer(&events[0])), maxEvents))
 
 				for idx := 0; idx < evtCount; idx++ {
-					switch EFEventType(C.get_ef_event_type(events[idx])) {
+					evt := (*C.ef_event)(unsafe.Pointer(&events[idx]))
+
+					switch EFEventType(C.get_ef_event_type(evt)) {
 					case EF_EVENT_TYPE_RX_PACKED_STREAM:
 					default:
+						// if bool(C.test_event_rx_ps_next_buffer(evt)) {
+
+						// }
 					}
 				}
 			}

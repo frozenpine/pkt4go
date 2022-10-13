@@ -159,7 +159,7 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 			case <-ctx.Done():
 				return
 			default:
-				frm := pkt4go.CreateEtherFrame()
+				frm := pkt4go.CreateEmptyEtherFrame()
 
 				var timestamp C.exanic_cycles32_t
 				var tsps C.struct_timespec

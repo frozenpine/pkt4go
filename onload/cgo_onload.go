@@ -30,13 +30,18 @@ static inline u_int16_t get_ef_event_type(ef_event *evt)
 
 static inline bool test_event_rx_ps_next_buffer(ef_event *evt)
 {
-    return EF_EVENT_RX_PS_NEXT_BUFFER(*evt) == EF_EVENT_FLAG_PS_NEXT_BUFFER;
+    return EF_EVENT_RX_PS_NEXT_BUFFER(*evt);
 }
 */
 import "C"
 import (
 	"context"
+	"io"
+	"log"
+	"net"
+	"reflect"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/frozenpine/pkt4go"
@@ -56,12 +61,14 @@ const (
 	// maxEvents * EF_VI_RX_PS_BUF_SIZE_64K * 2
 	defaultHugePageSize int64 = 2 * 16 * 64 * 1024
 	defaultPktBufferLen       = 100
+	defaultTCPBufferLen       = 1024 * 1024
 	maxEvents                 = 16
 )
 
 var (
 	flags        C.enum_ef_vi_flags = defaultFlags
 	hugePageSize int64              = defaultHugePageSize
+	verbose                         = false
 )
 
 type buffer struct {
@@ -75,12 +82,13 @@ type Device struct {
 	vi                C.struct_ef_vi
 	psp               C.ef_packed_stream_params
 	memreg            C.struct_ef_memreg
+	pspStartOffset    C.int
 	currentBuffer     *buffer
 	postedBuffers     *buffer
 	postedBuffersTail **buffer
-	// psPktIter         *C.ef_packed_stream_packet
-	rxPkts  uint64
-	rxBytes uint64
+	psPktIter         *C.ef_packed_stream_packet
+	rxPkts            uint64
+	rxBytes           uint64
 }
 
 func (dev *Device) closeDH() {
@@ -101,6 +109,28 @@ func (dev *Device) Release() {
 	dev.freePD()
 
 	dev.closeDH()
+}
+
+func (dev *Device) putPostedBuffer(buf *buffer) {
+	buf.next = nil
+
+	*dev.postedBuffersTail = buf
+
+	dev.postedBuffersTail = &buf.next
+}
+
+func (dev *Device) getPostedBuffer() *buffer {
+	buf := dev.postedBuffers
+
+	if buf != nil {
+		dev.postedBuffers = buf.next
+
+		if dev.postedBuffers == nil {
+			dev.postedBuffersTail = &dev.postedBuffers
+		}
+	}
+
+	return buf
 }
 
 // EventType Possible types of events
@@ -199,6 +229,8 @@ func CreateHandler(src string) (*Device, error) {
 		return nil, errors.New("get packed stream params failed")
 	}
 
+	// TODO: mmap huge page for rx cache
+
 	return &dev, nil
 }
 
@@ -212,7 +244,7 @@ func createFilter(input string) *C.ef_filter_spec {
 	return &filter
 }
 
-func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.DataHandler) error {
+func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.DataHandler) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -226,6 +258,7 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 	}
 
 	pktCh := make(chan *pkt4go.IPv4Packet, defaultPktBufferLen)
+	events := [maxEvents]C.ef_event{}
 
 	done := sync.WaitGroup{}
 
@@ -237,33 +270,210 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 			done.Done()
 		}()
 
-		events := [maxEvents]C.ef_event{}
-		currentBuffer := C.buf{}
+		var nPkts, nBytes, rc C.int
 
+	CAPTURE:
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			default:
-				// TODO: packet handler
 				evtCount := int(C.get_ef_event_poll(&dev.vi, (*C.ef_event)(unsafe.Pointer(&events[0])), maxEvents))
 
 				for idx := 0; idx < evtCount; idx++ {
 					evt := (*C.ef_event)(unsafe.Pointer(&events[idx]))
+					evtType := EFEventType(C.get_ef_event_type(evt))
 
-					switch EFEventType(C.get_ef_event_type(evt)) {
+					switch evtType {
 					case EF_EVENT_TYPE_RX_PACKED_STREAM:
-					default:
-						// if bool(C.test_event_rx_ps_next_buffer(evt)) {
+						if bool(C.test_event_rx_ps_next_buffer(evt)) {
+							if dev.currentBuffer != nil {
+								if rtn := int(C.ef_vi_receive_post(&dev.vi, dev.currentBuffer.efAddr, 0)); rtn < 0 {
+									err = errors.Errorf("receive data failed: rc=%d, errno=%d, (%s)", rtn)
+									break CAPTURE
+								}
 
-						// }
+								dev.putPostedBuffer(dev.currentBuffer)
+							}
+
+							dev.currentBuffer = dev.getPostedBuffer()
+							dev.psPktIter = C.ef_packed_stream_packet_first(unsafe.Pointer(dev.currentBuffer), dev.pspStartOffset)
+						}
+
+						psPkt := dev.psPktIter
+						rc = C.ef_vi_packed_stream_unbundle(&dev.vi, evt, &dev.psPktIter, &nPkts, &nBytes)
+						if verbose {
+							log.Printf("Event: rc=%d n_pkts=%d n_bytes=%d\n", rc, nPkts, nBytes)
+						}
+
+						dev.rxPkts += uint64(nPkts)
+						dev.rxBytes += uint64(nBytes)
+
+						for count := 0; count < int(nPkts); count++ {
+							payloadPtr := C.ef_packed_stream_packet_payload(psPkt)
+							len := int(psPkt.ps_cap_len)
+							payload := (*[]byte)(unsafe.Pointer(&reflect.SliceHeader{Data: uintptr(payloadPtr), Len: len, Cap: len}))
+
+							frm := pkt4go.CreateEtherFrame(*payload, time.Unix(int64(psPkt.ps_ts_sec), int64(psPkt.ps_ts_nsec)))
+
+							if err := frm.Unpack(frm.Buffer); err != nil {
+								log.Printf("unpack eth header failed: %v", err)
+								log.Printf("%+v", frm)
+								frm.Release()
+								continue
+							} else if frm.Type != pkt4go.ProtoIP {
+								log.Printf("%s received ether frame[%04x]: %s -> %s", frm.Timestamp, frm.Type, frm.SrcHost, frm.DstHost)
+								frm.Release()
+								continue
+							}
+
+							pkt := pkt4go.CreateIPv4Packet(frm)
+
+							if err := pkt.Unpack(frm.GetPayload()); err != nil {
+								log.Printf("unpack ip header failed: %v", err)
+								log.Printf("%+v", frm)
+								pkt.Release()
+								continue
+							}
+
+							pktCh <- pkt
+
+							psPkt = C.ef_packed_stream_packet_next(psPkt)
+						}
+					default:
+						log.Printf("Unexpected event type: %d", evtType)
 					}
 				}
 			}
 		}
 	}()
 
+	var (
+		segment        pkt4go.PktData
+		flowHash       uint64
+		sessionBuffers = make(map[uint64][]byte)
+		buffer         []byte
+		bufferExist    bool
+		src, dst       net.Addr
+		usedSize       int
+	)
+
+RUN:
+	for {
+		select {
+		case <-ctx.Done():
+			break RUN
+		case pkt := <-pktCh:
+			if pkt == nil {
+				break RUN
+			}
+
+			switch pkt.Protocol {
+			case pkt4go.TCP:
+				tcp := pkt4go.CreateTCPSegment(pkt)
+
+				if err = tcp.Unpack(pkt.GetPayload()); err != nil {
+					log.Printf("unpack tcp header failed: %v", err)
+
+					goto RELEASE
+				}
+
+				segment = tcp
+				flowHash = tcp.Flow().FastHash()
+
+				if tcp.Flags.HasFlag(pkt4go.SYN | pkt4go.ACK) {
+					sessionBuffers[flowHash] = make([]byte, 0, defaultTCPBufferLen)
+					goto RELEASE
+				}
+
+				if tcp.Flags.HasFlag(pkt4go.FIN | pkt4go.ACK) {
+					delete(sessionBuffers, flowHash)
+					goto RELEASE
+				}
+
+				payload := tcp.GetPayload()
+
+				if len(payload) <= 0 {
+					goto RELEASE
+				}
+
+				if buffer, bufferExist = sessionBuffers[flowHash]; !bufferExist {
+					goto RELEASE
+				}
+
+				buffer = append(buffer, payload...)
+
+				src = &net.TCPAddr{
+					IP: net.IPv4(
+						pkt.SrcAddr[0], pkt.SrcAddr[1],
+						pkt.SrcAddr[2], pkt.SrcAddr[3],
+					),
+					Port: int(tcp.SrcPort),
+				}
+				dst = &net.TCPAddr{
+					IP: net.IPv4(
+						pkt.DstAddr[0], pkt.DstAddr[1],
+						pkt.DstAddr[2], pkt.DstAddr[3],
+					),
+					Port: int(tcp.DstPort),
+				}
+			case pkt4go.UDP:
+				udp := pkt4go.CreateUDPSegment(pkt)
+
+				if err = udp.Unpack(pkt.GetPayload()); err != nil {
+					log.Printf("unpack udp header failed: %v", err)
+
+					goto RELEASE
+				}
+
+				segment = udp
+				flowHash = udp.Flow().FastHash()
+
+				if buffer, bufferExist = sessionBuffers[flowHash]; bufferExist {
+					buffer = append(buffer, segment.GetPayload()...)
+				} else {
+					buffer = segment.GetPayload()
+				}
+
+				src = &net.UDPAddr{
+					IP: net.IPv4(
+						pkt.SrcAddr[0], pkt.SrcAddr[1],
+						pkt.SrcAddr[2], pkt.SrcAddr[3],
+					),
+					Port: int(udp.SrcPort),
+				}
+				dst = &net.UDPAddr{
+					IP: net.IPv4(
+						pkt.DstAddr[0], pkt.DstAddr[1],
+						pkt.DstAddr[2], pkt.DstAddr[3],
+					),
+					Port: int(udp.DstPort),
+				}
+			default:
+				log.Printf("unsuppored transport: %x", pkt.Protocol)
+
+				goto RELEASE
+			}
+
+			usedSize, err = fn(src, dst, segment.GetTimestamp(), buffer)
+
+			if err != nil {
+				if err == io.EOF {
+					segment.Release()
+					return nil
+				}
+
+				log.Printf("payload handler error: %v", err)
+			} else if len(buffer) > usedSize {
+				sessionBuffers[flowHash] = buffer[usedSize:]
+			}
+
+		RELEASE:
+			segment.Release()
+		}
+	}
+
 	done.Wait()
 
-	return nil
+	return
 }

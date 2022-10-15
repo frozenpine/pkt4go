@@ -44,6 +44,16 @@ static inline u_int64_t round_up(int p, int align)
 
 #define RX_DMA_OFF round_up(sizeof(struct pkt_buf), EF_VI_DMA_ALIGN)
 
+static inline void exec_ef_vi_receive_init(struct ef_vi *vi, void *addr, int dma_id)
+{
+	ef_vi_receive_init(vi, addr, dma_id);
+}
+
+static inline void exec_ef_vi_receive_push(struct ef_vi *vi)
+{
+	ef_vi_receive_push(vi);
+}
+
 static inline int get_ef_event_poll(struct ef_vi *evq, ef_event *evs, int evs_len)
 {
     return ef_eventq_poll(evq, evs, evs_len);
@@ -147,6 +157,28 @@ func (dev *Device) Release() {
 	dev.freePD()
 
 	dev.closeDH()
+}
+
+func (dev *Device) refillRxRing() bool {
+	if C.ef_vi_receive_fill_level(&dev.vi) > dev.refillLevel ||
+		dev.nFreePktBufs < refillBatchSize {
+		return false
+	}
+
+	var pktBuf *C.pkt_buf_t
+
+	for next := true; next; next = C.ef_vi_receive_fill_level(&dev.vi) < dev.refillMin && dev.nFreePktBufs >= refillBatchSize {
+		for i := 0; i < refillBatchSize; i++ {
+			pktBuf = dev.freePktBufs
+			dev.freePktBufs = dev.freePktBufs.next
+			dev.nFreePktBufs--
+			C.exec_ef_vi_receive_init(&dev.vi, unsafe.Pointer(uintptr(pktBuf.ef_addr+C.RX_DMA_OFF)), pktBuf.id)
+		}
+	}
+
+	C.exec_ef_vi_receive_push(&dev.vi)
+
+	return true
 }
 
 // EventType Possible types of events
@@ -302,7 +334,14 @@ func CreateHandler(iface string) (*Device, error) {
 	dev.pktBufs = C.mmap(nil, allocSize, C.PROT_READ|C.PROT_WRITE,
 		/*MAP_ANONYMOUS |*/ C.MAP_PRIVATE|C.MAP_HUGETLB, -1, 0)
 	if dev.pktBufs == C.MAP_FAILED {
-		return nil, errors.New("require mmap buffer faild")
+		log.Printf("Require mmap failed, are huge pages configured?")
+
+		/* Allocate huge-page-aligned memory to give best chance of allocating
+		 * transparent huge-pages.
+		 */
+		if err := try(C.posix_memalign(&dev.pktBufs, C.ulong(hugePageSize), C.ulong(allocSize))); err != nil {
+			return nil, errors.Wrap(err, "transparent huge-pages align failed")
+		}
 	}
 
 	if err := try(C.ef_memreg_alloc(&dev.memreg, dev.dh, &dev.pd, dev.dh, dev.pktBufs, allocSize)); err != nil {
@@ -322,6 +361,10 @@ func CreateHandler(iface string) (*Device, error) {
 
 	dev.refillLevel = dev.nBufs - C.int(refillBatchSize)
 	dev.refillMin = dev.nBufs / 2
+
+	for level := C.ef_vi_receive_fill_level(&dev.vi); level <= dev.refillLevel; {
+		dev.refillRxRing()
+	}
 
 	return &dev, nil
 }

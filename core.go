@@ -316,6 +316,7 @@ type EtherFrame struct {
 	Buffer    []byte
 	Timestamp time.Time
 	nextLayer *IPv4Packet
+	release   func()
 }
 
 func (frm *EtherFrame) Release() {
@@ -323,6 +324,14 @@ func (frm *EtherFrame) Release() {
 
 	etherFrmPool.Put(frm)
 	payloadPool.Put(frm.Buffer)
+
+	if frm.release != nil {
+		frm.release()
+	}
+}
+
+func (frm *EtherFrame) DelegateRelease(fn func()) {
+	frm.release = fn
 }
 
 func (frm *EtherFrame) PreLayer() PktData {

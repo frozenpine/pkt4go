@@ -20,11 +20,17 @@ package onload
 #include <etherfabric/packedstream.h>
 #include <etherfabric/memreg.h>
 
-typedef struct buf
+typedef struct pkt_buf
 {
+	// I/O address corresponding to the start of this pkt_buf struct
 	ef_addr ef_addr;
-	struct buf *next;
-} buf_t;
+
+	// pointer to where received packets start
+	void *rx_ptr;
+
+	int id;
+	struct pkt_buf *next;
+} pkt_buf_t;
 
 static inline int get_errno()
 {
@@ -35,6 +41,8 @@ static inline u_int64_t round_up(int p, int align)
 {
     return ((p) + (align)-1u) & ~((align)-1u);
 }
+
+#define RX_DMA_OFF round_up(sizeof(struct pkt_buf), EF_VI_DMA_ALIGN)
 
 static inline int get_ef_event_poll(struct ef_vi *evq, ef_event *evs, int evs_len)
 {
@@ -76,33 +84,49 @@ func GetInterfaceVersion() string {
 }
 
 const (
-	defaultFlags C.enum_ef_vi_flags = C.EF_VI_RX_PACKED_STREAM | C.EF_VI_RX_PS_BUF_SIZE_64K | C.EF_VI_RX_TIMESTAMPS
-	// maxEvents * EF_VI_RX_PS_BUF_SIZE_64K * 2
-	defaultHugePageSize int64 = 2 * 16 * 64 * 1024
-	defaultPktBufferLen       = 100
-	defaultTCPBufferLen       = 1024 * 1024
-	maxEvents                 = 16
+	defaultFlags           C.enum_ef_vi_flags = C.EF_VI_FLAGS_DEFAULT | C.EF_VI_RX_TIMESTAMPS
+	defaultHugePageSize    int64              = 2 * 1024 * 1024
+	defaultPktBufSize                         = 2048
+	defaultRefillBatchSize                    = 16
+
+	defaultPktBufferLen = 100
+	defaultTCPBufferLen = 1024 * 1024
 )
 
 var (
-	flags        C.enum_ef_vi_flags = defaultFlags
-	hugePageSize int64              = defaultHugePageSize
-	verbose                         = false
+	flags           C.enum_ef_vi_flags = defaultFlags
+	hugePageSize                       = defaultHugePageSize
+	pktBufSize                         = defaultPktBufSize
+	refillBatchSize                    = defaultRefillBatchSize
+
+	verbose = false
 )
 
 type Device struct {
-	dh                C.ef_driver_handle
-	pd                C.struct_ef_pd
-	vi                C.struct_ef_vi
-	psp               C.ef_packed_stream_params
-	memreg            C.struct_ef_memreg
-	pspStartOffset    C.int
-	currentBuffer     *C.struct_buf
-	postedBuffers     *C.struct_buf
-	postedBuffersTail **C.struct_buf
-	psPktIter         *C.ef_packed_stream_packet
-	rxPkts            uint64
-	rxBytes           uint64
+	/* handle for accessing the driver */
+	dh C.ef_driver_handle
+
+	/* protection domain */
+	pd C.struct_ef_pd
+
+	/* virtual interface (rxq + txq) */
+	vi                        C.struct_ef_vi
+	rxPrefixLen, pktLenOffset C.int
+	refillLevel, refillMin    C.int
+
+	/* registered memory for DMA */
+	nBufs   C.int
+	evqSize C.int
+	pktBufs unsafe.Pointer
+	memreg  C.struct_ef_memreg
+
+	/* pool of free packet buffers (LIFO to minimise working set) */
+	freePktBufs  *C.pkt_buf_t
+	nFreePktBufs int
+
+	/* statistics */
+	rxPkts  uint64
+	rxBytes uint64
 }
 
 func (dev *Device) closeDH() {
@@ -123,28 +147,6 @@ func (dev *Device) Release() {
 	dev.freePD()
 
 	dev.closeDH()
-}
-
-func (dev *Device) putPostedBuffer(buf *C.struct_buf) {
-	buf.next = nil
-
-	*dev.postedBuffersTail = buf
-
-	dev.postedBuffersTail = &buf.next
-}
-
-func (dev *Device) getPostedBuffer() *C.struct_buf {
-	buf := dev.postedBuffers
-
-	if buf != nil {
-		dev.postedBuffers = buf.next
-
-		if dev.postedBuffers == nil {
-			dev.postedBuffersTail = &dev.postedBuffers
-		}
-	}
-
-	return buf
 }
 
 // EventType Possible types of events
@@ -211,6 +213,23 @@ func try(rtn C.int) error {
 	return nil
 }
 
+func pktBufFromID(dev *Device, idx int) (*C.pkt_buf_t, error) {
+	if idx >= int(dev.nBufs) {
+		return nil, fmt.Errorf("buffer idx exceeded")
+	}
+
+	return (*C.pkt_buf_t)(
+		unsafe.Pointer(
+			uintptr(dev.pktBufs) + uintptr(idx*pktBufSize),
+		)), nil
+}
+
+func freePktBuf(dev *Device, pktBuf *C.pkt_buf_t) {
+	pktBuf.next = dev.freePktBufs
+	dev.freePktBufs = pktBuf
+	dev.nFreePktBufs++
+}
+
 func CreateHandler(iface string) (*Device, error) {
 	if iface == "" {
 		return nil, errors.New("device can not be empty")
@@ -226,7 +245,7 @@ func CreateHandler(iface string) (*Device, error) {
 		&dev.pd,
 		dev.dh,
 		C.CString(iface),
-		C.EF_PD_RX_PACKED_STREAM,
+		C.EF_PD_DEFAULT,
 	)); err != nil {
 		dev.closeDH()
 
@@ -236,51 +255,73 @@ func CreateHandler(iface string) (*Device, error) {
 	if err := try(C.ef_vi_alloc_from_pd(
 		&dev.vi, dev.dh,
 		&dev.pd, dev.dh,
-		-1, -1, -1, nil, -1,
+		-1, -1, 0, nil, -1,
 		flags,
 	)); err != nil {
 		dev.freePD()
 		dev.closeDH()
 
-		return nil, errors.Wrap(err, "alloc virtual interface faile")
+		return nil, errors.Wrap(err, "alloc virtual interface failed")
 	}
 
-	if err := try(C.ef_vi_packed_stream_get_params(&dev.vi, &dev.psp)); err != nil {
-		dev.freeVI()
-		dev.freePD()
-		dev.closeDH()
+	dev.rxPrefixLen = C.ef_vi_receive_prefix_len(&dev.vi)
 
-		return nil, errors.Wrap(err, "get packed stream params failed")
+	var layoutPtr *C.ef_vi_layout_entry
+	var len C.int
+	if err := try(C.ef_vi_receive_query_layout(&dev.vi, &layoutPtr, &len)); err != nil {
+		return nil, errors.Wrap(err, "query layout failed")
+	} else {
+		layoutLen := int(len)
+		layoutSlice := *(*[]*C.ef_vi_layout_entry)(unsafe.Pointer(&reflect.SliceHeader{
+			Data: uintptr(unsafe.Pointer(layoutPtr)),
+			Len:  layoutLen,
+			Cap:  layoutLen,
+		}))
+
+		for _, layout := range layoutSlice {
+			if layout.evle_type != C.EF_VI_LAYOUT_PACKET_LENGTH {
+				continue
+			}
+
+			dev.pktLenOffset = layout.evle_offset
+		}
 	}
-	dev.pspStartOffset = dev.psp.psp_start_offset
 
-	nBufs := dev.psp.psp_max_usable_buffers
-	if nBufs > C.ef_vi_receive_capacity(&dev.vi) {
-		return nil, errors.New("receive buffer capacity exceeded")
+	dev.nBufs = C.ef_vi_receive_capacity(&dev.vi) - C.int(refillBatchSize)
+	dev.evqSize = C.ef_eventq_capacity(&dev.vi)
+
+	if verbose {
+		log.Printf(
+			"max_fill=%d\nevq_size=%d\nrx_prefix_len=%d",
+			dev.nBufs, dev.evqSize, dev.rxPrefixLen,
+		)
 	}
-	bufSize := dev.psp.psp_buffer_size
-	allocSize := C.round_up(nBufs*bufSize, C.int(hugePageSize))
 
-	p := C.mmap(nil, allocSize, C.PROT_READ|C.PROT_WRITE,
+	allocSize := C.round_up(dev.nBufs*C.int(pktBufSize), C.int(hugePageSize))
+
+	dev.pktBufs = C.mmap(nil, allocSize, C.PROT_READ|C.PROT_WRITE,
 		/*MAP_ANONYMOUS |*/ C.MAP_PRIVATE|C.MAP_HUGETLB, -1, 0)
-	if p == C.MAP_FAILED || (uintptr(p)&uintptr(dev.psp.psp_buffer_align-1)) != 0 {
+	if dev.pktBufs == C.MAP_FAILED {
 		return nil, errors.New("require mmap buffer faild")
 	}
 
-	if err := try(C.ef_memreg_alloc(&dev.memreg, dev.dh, &dev.pd, dev.dh, p, allocSize)); err != nil {
+	if err := try(C.ef_memreg_alloc(&dev.memreg, dev.dh, &dev.pd, dev.dh, dev.pktBufs, allocSize)); err != nil {
 		return nil, errors.Wrap(err, "memreg alloc failed")
 	}
 
-	for idx := 0; idx < int(nBufs); idx++ {
-		buf := (*C.struct_buf)(unsafe.Pointer(uintptr(p) + uintptr(idx*int(bufSize))))
-		buf.ef_addr = C.ef_memreg_dma_addr(&dev.memreg, C.size_t(idx*int(bufSize)))
+	for idx := 0; idx < int(dev.nBufs); idx++ {
+		buf, _ := pktBufFromID(&dev, idx)
 
-		if err := try(C.ef_vi_receive_post(&dev.vi, buf.ef_addr, 0)); err != nil {
-			return nil, errors.Wrap(err, "ef_vi receive post faild")
-		}
+		buf.rx_ptr = unsafe.Pointer(
+			uintptr(unsafe.Pointer(buf)) + uintptr(C.RX_DMA_OFF) + uintptr(dev.rxPrefixLen),
+		)
+		buf.id = C.int(idx)
 
-		dev.putPostedBuffer(buf)
+		buf.ef_addr = C.ef_memreg_dma_addr(&dev.memreg, C.size_t(idx*pktBufSize))
 	}
+
+	dev.refillLevel = dev.nBufs - C.int(refillBatchSize)
+	dev.refillMin = dev.nBufs / 2
 
 	return &dev, nil
 }

@@ -10,8 +10,8 @@
  */
 #ifndef __USE_POSIX199309
 #define __USE_POSIX199309
+#
 #include <bits/time.h>
-#endif
 #include <getopt.h>
 #include <pthread.h>
 #include <poll.h>

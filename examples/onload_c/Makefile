@@ -2,7 +2,8 @@ NAME=onload_c
 ARCH=$(shell uname -m)
 
 LIB=-L../../onload/libs
-LD_FLAGS=-lciul1
+LD_FLAGS=-lciul1 -lonload_ext -lpthread
+# DEPS=../../onload/lib/ciapp/net.c
 
 INCLUDE=-I../../ -I../../onload/include
 

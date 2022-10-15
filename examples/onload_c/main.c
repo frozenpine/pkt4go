@@ -8,18 +8,22 @@
  * Author: David Riddoch
  * Date: 2011/04/28
  */
-#include <time.h>
+#ifndef __USE_POSIX199309
+#define __USE_POSIX199309
+#include <bits/time.h>
+#endif
 #include <getopt.h>
+#include <pthread.h>
+#include <poll.h>
+
 #include <etherfabric/vi.h>
 #include <etherfabric/pd.h>
 #include <etherfabric/memreg.h>
-
-#include <poll.h>
-
 #include "utils.h"
 
 #define EV_POLL_BATCH_SIZE 16
 #define REFILL_BATCH_SIZE 16
+#define __EFAB_VI_H__
 
 /* Hardware delivers at most ef_vi_receive_buffer_len() bytes to each
  * buffer (default 1792), and for best performance buffers should be

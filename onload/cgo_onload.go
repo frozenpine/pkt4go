@@ -634,17 +634,25 @@ func CreateHandler(iface string) (*Device, error) {
 
 	dev.rxPrefixLen = C.ef_vi_receive_prefix_len((*C.struct_ef_vi)(dev.vi))
 
-	var layoutPtr *C.ef_vi_layout_entry
+	var layoutPtr uintptr
 	var len C.int
-	if err := try(C.ef_vi_receive_query_layout((*C.struct_ef_vi)(dev.vi), &layoutPtr, &len)); err != nil {
+	if err := try(C.ef_vi_receive_query_layout(
+		(*C.struct_ef_vi)(dev.vi),
+		(**C.ef_vi_layout_entry)(unsafe.Pointer(&layoutPtr)),
+		(*C.int)(unsafe.Pointer(&len)),
+	)); err != nil {
 		return nil, errors.Wrap(err, "query layout failed")
 	} else {
 		layoutLen := int(len)
-		layoutSlice := *(*[]*C.ef_vi_layout_entry)(unsafe.Pointer(&reflect.SliceHeader{
-			Data: uintptr(unsafe.Pointer(layoutPtr)),
-			Len:  layoutLen,
-			Cap:  layoutLen,
-		}))
+		layoutSlice := *(*[]C.ef_vi_layout_entry)(
+			unsafe.Pointer(&reflect.SliceHeader{
+				Data: layoutPtr,
+				Len:  layoutLen,
+				Cap:  layoutLen,
+			}),
+		)
+
+		log.Printf("%d %d %+v", layoutLen, layoutPtr, layoutSlice)
 
 		for _, layout := range layoutSlice {
 			if layout.evle_type != C.EF_VI_LAYOUT_PACKET_LENGTH {

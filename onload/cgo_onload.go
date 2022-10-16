@@ -203,10 +203,10 @@ type Device struct {
 	dh C.ef_driver_handle
 
 	/* protection domain */
-	pd C.struct_ef_pd
+	pd unsafe.Pointer
 
 	/* virtual interface (rxq + txq) */
-	vi                        C.struct_ef_vi
+	vi                        unsafe.Pointer
 	rxPrefixLen, pktLenOffset C.int
 	refillLevel, refillMin    C.int
 	batchLoops                int
@@ -215,7 +215,7 @@ type Device struct {
 	nBufs   C.int
 	evqSize C.int
 	pktBufs unsafe.Pointer
-	memreg  C.struct_ef_memreg
+	memreg  unsafe.Pointer
 
 	/* pool of free packet buffers (LIFO to minimise working set) */
 	freePktBufs  *C.pkt_buf_t
@@ -231,11 +231,11 @@ func (dev *Device) closeDH() {
 }
 
 func (dev *Device) freePD() {
-	C.ef_pd_free(&dev.pd, dev.dh)
+	C.ef_pd_free((*C.struct_ef_pd)(dev.pd), dev.dh)
 }
 
 func (dev *Device) freeVI() {
-	C.ef_vi_free(&dev.vi, dev.dh)
+	C.ef_vi_free((*C.struct_ef_vi)(dev.vi), dev.dh)
 }
 
 func (dev *Device) Release() {
@@ -279,7 +279,7 @@ func (dev *Device) handleRx(pktBufIdx, len int, pktCh chan<- *pkt4go.IPv4Packet)
 	)
 
 	if err := try(C.ef_vi_receive_get_timestamp_with_sync_flags(
-		&dev.vi, dmaPtr, &hwTS, &tsFlags,
+		(*C.struct_ef_vi)(dev.vi), dmaPtr, &hwTS, &tsFlags,
 	)); err != nil {
 		return err
 	}
@@ -349,23 +349,23 @@ func (dev *Device) handleRxDiscard(pktBufIdx, len int, typ EFRxDiscardType) erro
 }
 
 func (dev *Device) refillRxRing() bool {
-	if C.ef_vi_receive_fill_level(&dev.vi) > dev.refillLevel ||
+	if C.ef_vi_receive_fill_level((*C.struct_ef_vi)(dev.vi)) > dev.refillLevel ||
 		dev.nFreePktBufs < REFILL_BATCH_SIZE {
 		return false
 	}
 
 	var pktBuf *C.pkt_buf_t
 
-	for next := true; next; next = C.ef_vi_receive_fill_level(&dev.vi) < dev.refillMin && dev.nFreePktBufs >= REFILL_BATCH_SIZE {
+	for next := true; next; next = C.ef_vi_receive_fill_level((*C.struct_ef_vi)(dev.vi)) < dev.refillMin && dev.nFreePktBufs >= REFILL_BATCH_SIZE {
 		for i := 0; i < REFILL_BATCH_SIZE; i++ {
-			pktBuf = dev.freePktBufs
+			pktBuf = (*C.pkt_buf_t)(dev.freePktBufs)
 			dev.freePktBufs = dev.freePktBufs.next
 			dev.nFreePktBufs--
-			C.exec_ef_vi_receive_init(&dev.vi, unsafe.Pointer(uintptr(pktBuf.ef_addr+C.RX_DMA_OFF)), pktBuf.id)
+			C.exec_ef_vi_receive_init((*C.struct_ef_vi)(dev.vi), unsafe.Pointer(uintptr(pktBuf.ef_addr+C.RX_DMA_OFF)), pktBuf.id)
 		}
 	}
 
-	C.exec_ef_vi_receive_push(&dev.vi)
+	C.exec_ef_vi_receive_push((*C.struct_ef_vi)(dev.vi))
 
 	return true
 }
@@ -374,7 +374,7 @@ func (dev *Device) pollEvq(pktCh chan<- *pkt4go.IPv4Packet) (int, error) {
 	events := [EV_POLL_BATCH_SIZE]C.ef_event{}
 	IDs := [EF_VI_RECEIVE_BATCH]C.ef_request_id{}
 
-	eventCount := int(C.exec_ef_event_poll(&dev.vi, (*C.ef_event)(unsafe.Pointer(&events[0])), EV_POLL_BATCH_SIZE))
+	eventCount := int(C.exec_ef_event_poll((*C.struct_ef_vi)(dev.vi), (*C.ef_event)(unsafe.Pointer(&events[0])), EV_POLL_BATCH_SIZE))
 
 	for idx := 0; idx < eventCount; idx++ {
 		evt := &events[idx]
@@ -418,7 +418,7 @@ func (dev *Device) pollEvq(pktCh chan<- *pkt4go.IPv4Packet) (int, error) {
 		}
 
 		nRx := int(C.ef_vi_receive_unbundle(
-			&dev.vi, evt, (*C.ef_request_id)(unsafe.Pointer(&IDs[0]))),
+			(*C.struct_ef_vi)(dev.vi), evt, (*C.ef_request_id)(unsafe.Pointer(&IDs[0]))),
 		)
 
 		for idx := 0; idx < nRx; idx++ {
@@ -437,7 +437,7 @@ func (dev *Device) eventLoopThroughput(pktCh chan<- *pkt4go.IPv4Packet) error {
 		/* Avoid reading entries in the EVQ that are in the same cache line
 		 * that the network adapter is writing to.
 		 */
-		if C.ef_eventq_has_many_events(&dev.vi, C.int(evtLookAhead)) != 0 || dev.batchLoops == 0 {
+		if C.ef_eventq_has_many_events((*C.struct_ef_vi)(dev.vi), C.int(evtLookAhead)) != 0 || dev.batchLoops == 0 {
 			if _, err := dev.pollEvq(pktCh); err != nil {
 				return err
 			}
@@ -469,8 +469,8 @@ func (dev *Device) eventLoopBlocking(pktCh chan<- *pkt4go.IPv4Packet) error {
 
 		if !refilled && evtCount == 0 {
 			if err := try(C.ef_eventq_wait(
-				&dev.vi, dev.dh,
-				C.ef_eventq_current(&dev.vi), nil,
+				(*C.struct_ef_vi)(dev.vi), dev.dh,
+				C.ef_eventq_current((*C.struct_ef_vi)(dev.vi)), nil,
 			)); err != nil {
 				return err
 			}
@@ -483,7 +483,7 @@ func (dev *Device) eventLoopBlocking(pktCh chan<- *pkt4go.IPv4Packet) error {
 func (dev *Device) eventLoopBlockingPoll(pktCh chan<- *pkt4go.IPv4Packet) (err error) {
 	pollFD := C.struct_pollfd{fd: dev.dh, events: C.POLLIN, revents: 0}
 
-	if err = try(C.ef_vi_prime(&dev.vi, dev.dh, C.ef_eventq_current(&dev.vi))); err != nil {
+	if err = try(C.ef_vi_prime((*C.struct_ef_vi)(dev.vi), dev.dh, C.ef_eventq_current((*C.struct_ef_vi)(dev.vi)))); err != nil {
 		return err
 	}
 
@@ -506,8 +506,8 @@ POLL:
 		}
 
 		if err = try(C.ef_vi_prime(
-			&dev.vi, dev.dh,
-			C.ef_eventq_current(&dev.vi),
+			(*C.struct_ef_vi)(dev.vi), dev.dh,
+			C.ef_eventq_current((*C.struct_ef_vi)(dev.vi)),
 		)); err != nil {
 			break
 		}
@@ -599,14 +599,18 @@ func CreateHandler(iface string) (*Device, error) {
 		return nil, errors.New("device can not be empty")
 	}
 
-	dev := Device{}
+	dev := Device{
+		pd:     C.malloc(C.sizeof_struct_ef_pd),
+		vi:     C.malloc(C.sizeof_struct_ef_vi),
+		memreg: C.malloc(C.sizeof_struct_ef_memreg),
+	}
 
 	if err := try(C.ef_driver_open(&dev.dh)); err != nil {
 		return nil, errors.Wrap(err, "driver open failed")
 	}
 
 	if err := try(C.ef_pd_alloc_by_name(
-		&dev.pd,
+		(*C.struct_ef_pd)(dev.pd),
 		dev.dh,
 		C.CString(iface),
 		C.EF_PD_DEFAULT,
@@ -617,8 +621,8 @@ func CreateHandler(iface string) (*Device, error) {
 	}
 
 	if err := try(C.ef_vi_alloc_from_pd(
-		&dev.vi, dev.dh,
-		&dev.pd, dev.dh,
+		(*C.struct_ef_vi)(dev.vi), dev.dh,
+		(*C.struct_ef_pd)(dev.pd), dev.dh,
 		-1, -1, 0, nil, -1,
 		flags,
 	)); err != nil {
@@ -628,11 +632,11 @@ func CreateHandler(iface string) (*Device, error) {
 		return nil, errors.Wrap(err, "alloc virtual interface failed")
 	}
 
-	dev.rxPrefixLen = C.ef_vi_receive_prefix_len(&dev.vi)
+	dev.rxPrefixLen = C.ef_vi_receive_prefix_len((*C.struct_ef_vi)(dev.vi))
 
 	var layoutPtr *C.ef_vi_layout_entry
 	var len C.int
-	if err := try(C.ef_vi_receive_query_layout(&dev.vi, &layoutPtr, &len)); err != nil {
+	if err := try(C.ef_vi_receive_query_layout((*C.struct_ef_vi)(dev.vi), &layoutPtr, &len)); err != nil {
 		return nil, errors.Wrap(err, "query layout failed")
 	} else {
 		layoutLen := int(len)
@@ -651,8 +655,8 @@ func CreateHandler(iface string) (*Device, error) {
 		}
 	}
 
-	dev.nBufs = C.ef_vi_receive_capacity(&dev.vi) - C.int(REFILL_BATCH_SIZE)
-	dev.evqSize = C.ef_eventq_capacity(&dev.vi)
+	dev.nBufs = C.ef_vi_receive_capacity((*C.struct_ef_vi)(dev.vi)) - C.int(REFILL_BATCH_SIZE)
+	dev.evqSize = C.ef_eventq_capacity((*C.struct_ef_vi)(dev.vi))
 
 	if verbose {
 		log.Printf(
@@ -671,12 +675,12 @@ func CreateHandler(iface string) (*Device, error) {
 		/* Allocate huge-page-aligned memory to give best chance of allocating
 		 * transparent huge-pages.
 		 */
-		if err := try(C.posix_memalign(&dev.pktBufs, C.ulong(hugePageSize), C.ulong(allocSize))); err != nil {
+		if err := try(C.posix_memalign(&(dev.pktBufs), C.ulong(hugePageSize), C.ulong(allocSize))); err != nil {
 			return nil, errors.Wrap(err, "transparent huge-pages align failed")
 		}
 	}
 
-	if err := try(C.ef_memreg_alloc(&dev.memreg, dev.dh, &dev.pd, dev.dh, dev.pktBufs, allocSize)); err != nil {
+	if err := try(C.ef_memreg_alloc((*C.struct_ef_memreg)(dev.memreg), dev.dh, (*C.struct_ef_pd)(dev.pd), dev.dh, dev.pktBufs, allocSize)); err != nil {
 		return nil, errors.Wrap(err, "memreg alloc failed")
 	}
 
@@ -688,13 +692,13 @@ func CreateHandler(iface string) (*Device, error) {
 		)
 		buf.id = C.int(idx)
 
-		buf.ef_addr = C.ef_memreg_dma_addr(&dev.memreg, C.size_t(idx*PKT_BUF_SIZE))
+		buf.ef_addr = C.ef_memreg_dma_addr((*C.struct_ef_memreg)(dev.memreg), C.size_t(idx*PKT_BUF_SIZE))
 	}
 
 	dev.refillLevel = dev.nBufs - C.int(REFILL_BATCH_SIZE)
 	dev.refillMin = dev.nBufs / 2
 
-	for level := C.ef_vi_receive_fill_level(&dev.vi); level <= dev.refillLevel; {
+	for level := C.ef_vi_receive_fill_level((*C.struct_ef_vi)(dev.vi)); level <= dev.refillLevel; {
 		dev.refillRxRing()
 	}
 
@@ -723,7 +727,7 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 	defer dev.Release()
 
 	if efviFilter := createFilter(filter); efviFilter != nil {
-		if err := try(C.ef_vi_filter_add(&dev.vi, dev.dh, efviFilter, nil)); err != nil {
+		if err := try(C.ef_vi_filter_add((*C.struct_ef_vi)(dev.vi), dev.dh, efviFilter, nil)); err != nil {
 			return errors.Wrap(err, "add filter failed")
 		}
 	}

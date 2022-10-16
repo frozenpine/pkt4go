@@ -12,6 +12,7 @@ package onload
 #include <errno.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <poll.h>
 
 #include <etherfabric/base.h>
 #include <etherfabric/ef_vi.h>
@@ -155,6 +156,15 @@ func GetInterfaceVersion() string {
 	return C.GoString(C.ef_vi_driver_interface_str())
 }
 
+type mode uint8
+
+const (
+	EvqWait mode = iota
+	FDWait
+	LowLatency
+	BatchPoll
+)
+
 const (
 	defaultFlags        C.enum_ef_vi_flags = C.EF_VI_FLAGS_DEFAULT | C.EF_VI_RX_TIMESTAMPS
 	defaultHugePageSize int64              = 2 * 1024 * 1024
@@ -164,6 +174,8 @@ const (
 	PKT_BUF_SIZE            = 2048
 	EF_VI_RECEIVE_BATCH int = int(C.EF_VI_RECEIVE_BATCH)
 
+	defaultRunMode = EvqWait
+
 	defaultPktBufferLen = 100
 	defaultTCPBufferLen = 1024 * 1024
 )
@@ -171,6 +183,7 @@ const (
 var (
 	flags        C.enum_ef_vi_flags = defaultFlags
 	hugePageSize                    = defaultHugePageSize
+	runMode                         = defaultRunMode
 
 	verbose = false
 )
@@ -250,7 +263,7 @@ func (dev *Device) releasePktBuf(pktBuf *C.pkt_buf_t) {
 	dev.nFreePktBufs++
 }
 
-func (dev *Device) handleRx(pktBufIdx, len int) error {
+func (dev *Device) handleRx(pktBufIdx, len int, pktCh chan<- *pkt4go.IPv4Packet) error {
 	pktBuf, err := dev.pktBufFromID(pktBufIdx)
 	if err != nil {
 		return err
@@ -299,14 +312,15 @@ func (dev *Device) handleRx(pktBufIdx, len int) error {
 		return err
 	}
 
-	// TODO: channel notify
+	pktCh <- pkt
+
 	dev.rxPkts += 1
 	dev.rxBytes += uint64(len)
 
 	return nil
 }
 
-func (dev *Device) handleBatchRx(pktBufIdx int) error {
+func (dev *Device) handleBatchRx(pktBufIdx int, pktCh chan<- *pkt4go.IPv4Packet) error {
 	pktBuf, err := dev.pktBufFromID(pktBufIdx)
 	if err != nil {
 		return err
@@ -316,7 +330,7 @@ func (dev *Device) handleBatchRx(pktBufIdx int) error {
 
 	dataLen := *(*uint16)(unsafe.Pointer(dmaPtr + uintptr(dev.pktLenOffset)))
 
-	return dev.handleRx(pktBufIdx, int(dataLen))
+	return dev.handleRx(pktBufIdx, int(dataLen), pktCh)
 }
 
 func (dev *Device) handleRxDiscard(pktBufIdx, len int, typ EFRxDiscardType) error {
@@ -356,7 +370,7 @@ func (dev *Device) refillRxRing() bool {
 	return true
 }
 
-func (dev *Device) pollEvq() (int, error) {
+func (dev *Device) pollEvq(pktCh chan<- *pkt4go.IPv4Packet) (int, error) {
 	events := [EV_POLL_BATCH_SIZE]C.ef_event{}
 	IDs := [EF_VI_RECEIVE_BATCH]C.ef_request_id{}
 
@@ -375,7 +389,7 @@ func (dev *Device) pollEvq() (int, error) {
 			dmaIdx := C.get_ef_event_rx_rq_id(evt)
 			nBytes := C.get_ef_event_rx_bytes(evt)
 
-			if err := dev.handleRx(int(dmaIdx), int(nBytes)); err != nil {
+			if err := dev.handleRx(int(dmaIdx), int(nBytes), pktCh); err != nil {
 				return -1, err
 			}
 		case EF_EVENT_TYPE_RX_MULTI:
@@ -408,11 +422,98 @@ func (dev *Device) pollEvq() (int, error) {
 		)
 
 		for idx := 0; idx < nRx; idx++ {
-			dev.handleBatchRx(int(IDs[idx]))
+			dev.handleBatchRx(int(IDs[idx]), pktCh)
 		}
 	}
 
 	return eventCount, nil
+}
+
+func (dev *Device) eventLoopThroughput(pktCh chan<- *pkt4go.IPv4Packet) error {
+	evtLookAhead := EV_POLL_BATCH_SIZE + 7
+
+	for dev.refillRxRing(); true; dev.refillRxRing() {
+		dev.batchLoops--
+		/* Avoid reading entries in the EVQ that are in the same cache line
+		 * that the network adapter is writing to.
+		 */
+		if C.ef_eventq_has_many_events(&dev.vi, C.int(evtLookAhead)) != 0 || dev.batchLoops == 0 {
+			if _, err := dev.pollEvq(pktCh); err != nil {
+				return err
+			}
+
+			dev.batchLoops = 100
+		}
+	}
+
+	return nil
+}
+
+func (dev *Device) eventLoopLowLatency(pktCh chan<- *pkt4go.IPv4Packet) error {
+	for dev.refillRxRing(); true; dev.refillRxRing() {
+		if _, err := dev.pollEvq(pktCh); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (dev *Device) eventLoopBlocking(pktCh chan<- *pkt4go.IPv4Packet) error {
+	for refilled := dev.refillRxRing(); true; refilled = dev.refillRxRing() {
+		evtCount, err := dev.pollEvq(pktCh)
+
+		if err != nil {
+			return err
+		}
+
+		if !refilled && evtCount == 0 {
+			if err := try(C.ef_eventq_wait(
+				&dev.vi, dev.dh,
+				C.ef_eventq_current(&dev.vi), nil,
+			)); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (dev *Device) eventLoopBlockingPoll(pktCh chan<- *pkt4go.IPv4Packet) (err error) {
+	pollFD := C.struct_pollfd{fd: dev.dh, events: C.POLLIN, revents: 0}
+
+	if err = try(C.ef_vi_prime(&dev.vi, dev.dh, C.ef_eventq_current(&dev.vi))); err != nil {
+		return err
+	}
+
+POLL:
+	for err = try(C.poll(&pollFD, 1, -1)); err == nil; err = try(C.poll(&pollFD, 1, -1)) {
+		if pollFD.events&C.POLLIN == 0 {
+			continue
+		}
+
+		var evtCount int
+
+		for refilled := dev.refillRxRing(); true; refilled = dev.refillRxRing() {
+			if evtCount, err = dev.pollEvq(pktCh); err != nil {
+				break POLL
+			}
+
+			if evtCount == 0 && !refilled {
+				break
+			}
+		}
+
+		if err = try(C.ef_vi_prime(
+			&dev.vi, dev.dh,
+			C.ef_eventq_current(&dev.vi),
+		)); err != nil {
+			break
+		}
+	}
+
+	return
 }
 
 // EventType Possible types of events
@@ -625,6 +726,21 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 
 	pktCh := make(chan *pkt4go.IPv4Packet, defaultPktBufferLen)
 
+	var eventHandler func(chan<- *pkt4go.IPv4Packet) error
+
+	switch runMode {
+	case EvqWait:
+		eventHandler = dev.eventLoopBlocking
+	case FDWait:
+		eventHandler = dev.eventLoopBlockingPoll
+	case LowLatency:
+		eventHandler = dev.eventLoopLowLatency
+	case BatchPoll:
+		eventHandler = dev.eventLoopThroughput
+	default:
+		return errors.New("no valid run mode specified")
+	}
+
 	done := sync.WaitGroup{}
 
 	done.Add(1)
@@ -640,7 +756,9 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 			case <-ctx.Done():
 				return
 			default:
-				// TODO
+				if err = eventHandler(pktCh); err != nil {
+					return
+				}
 			}
 		}
 	}()

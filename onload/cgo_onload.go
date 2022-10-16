@@ -702,11 +702,15 @@ func CreateHandler(iface string) (*Device, error) {
 }
 
 func createFilter(input string) *C.ef_filter_spec {
-	if input == "" {
+	var filter C.ef_filter_spec
+
+	if err := try(C.ef_filter_spec_set_port_sniff(&filter, 1)); err != nil {
 		return nil
 	}
 
-	var filter C.ef_filter_spec
+	if input != "" {
+		// TODO: filter parse
+	}
 
 	return &filter
 }

@@ -24,3 +24,11 @@ func TestSession(t *testing.T) {
 
 	t.Log(hash)
 }
+
+func TestTypePrint(t *testing.T) {
+	ip := pkt4go.ProtoIP
+
+	tcp := pkt4go.TCP
+
+	t.Logf("%#04x %#02x", uint16(ip), byte(tcp))
+}

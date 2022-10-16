@@ -156,10 +156,10 @@ func GetInterfaceVersion() string {
 	return C.GoString(C.ef_vi_driver_interface_str())
 }
 
-type mode uint8
+type Mode uint8
 
 const (
-	EvqWait mode = iota
+	EvqWait Mode = iota
 	FDWait
 	LowLatency
 	BatchPoll
@@ -301,7 +301,10 @@ func (dev *Device) handleRx(pktBufIdx, len int, pktCh chan<- *pkt4go.IPv4Packet)
 		frm.Release()
 		return err
 	} else if frm.Type != pkt4go.ProtoIP {
-		log.Printf("%s received ether frame[%04x]: %s -> %s", frm.Timestamp, frm.Type, frm.SrcHost, frm.DstHost)
+		log.Printf(
+			"%s received non-IP ether frame[%04x]: %s -> %s",
+			frm.Timestamp, uint16(frm.Type), frm.SrcHost, frm.DstHost,
+		)
 		frm.Release()
 	}
 
@@ -652,8 +655,6 @@ func CreateHandler(iface string) (*Device, error) {
 			}),
 		)
 
-		log.Printf("%d %d %+v", layoutLen, layoutPtr, layoutSlice)
-
 		for _, layout := range layoutSlice {
 			if layout.evle_type != C.EF_VI_LAYOUT_PACKET_LENGTH {
 				continue
@@ -688,10 +689,6 @@ func CreateHandler(iface string) (*Device, error) {
 		}
 	}
 
-	if err := try(C.ef_memreg_alloc((*C.struct_ef_memreg)(dev.memreg), dev.dh, (*C.struct_ef_pd)(dev.pd), dev.dh, dev.pktBufs, allocSize)); err != nil {
-		return nil, errors.Wrap(err, "memreg alloc failed")
-	}
-
 	for idx := 0; idx < int(dev.nBufs); idx++ {
 		buf, _ := dev.pktBufFromID(idx)
 
@@ -700,21 +697,37 @@ func CreateHandler(iface string) (*Device, error) {
 		)
 		buf.id = C.int(idx)
 
+		dev.releasePktBuf(buf)
+	}
+
+	if err := try(C.ef_memreg_alloc((*C.struct_ef_memreg)(dev.memreg), dev.dh, (*C.struct_ef_pd)(dev.pd), dev.dh, dev.pktBufs, allocSize)); err != nil {
+		return nil, errors.Wrap(err, "memreg alloc failed")
+	}
+
+	log.Println("memreg alloc succeed.")
+
+	for idx := 0; idx < int(dev.nBufs); idx++ {
+		buf, _ := dev.pktBufFromID(idx)
+
 		buf.ef_addr = C.ef_memreg_dma_addr((*C.struct_ef_memreg)(dev.memreg), C.size_t(idx*PKT_BUF_SIZE))
 	}
 
 	dev.refillLevel = dev.nBufs - C.int(REFILL_BATCH_SIZE)
 	dev.refillMin = dev.nBufs / 2
 
-	for level := C.ef_vi_receive_fill_level((*C.struct_ef_vi)(dev.vi)); level <= dev.refillLevel; {
+	log.Printf("refill level: %d, refill min:%d", dev.refillLevel, dev.refillMin)
+
+	for C.ef_vi_receive_fill_level((*C.struct_ef_vi)(dev.vi)) <= dev.refillLevel {
 		dev.refillRxRing()
 	}
+
+	log.Println("ef_vi handler created.")
 
 	return &dev, nil
 }
 
 func createFilter(input string) *C.ef_filter_spec {
-	var filter C.ef_filter_spec
+	filter := C.ef_filter_spec{}
 
 	if err := try(C.ef_filter_spec_set_port_sniff(&filter, 1)); err != nil {
 		return nil
@@ -732,6 +745,8 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 		ctx = context.Background()
 	}
 
+	log.Println("Start capture.")
+
 	defer dev.Release()
 
 	if efviFilter := createFilter(filter); efviFilter != nil {
@@ -742,17 +757,17 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 
 	pktCh := make(chan *pkt4go.IPv4Packet, defaultPktBufferLen)
 
-	var eventHandler func(chan<- *pkt4go.IPv4Packet) error
+	var eventLoop func(chan<- *pkt4go.IPv4Packet) error
 
 	switch runMode {
 	case EvqWait:
-		eventHandler = dev.eventLoopBlocking
+		eventLoop = dev.eventLoopBlocking
 	case FDWait:
-		eventHandler = dev.eventLoopBlockingPoll
+		eventLoop = dev.eventLoopBlockingPoll
 	case LowLatency:
-		eventHandler = dev.eventLoopLowLatency
+		eventLoop = dev.eventLoopLowLatency
 	case BatchPoll:
-		eventHandler = dev.eventLoopThroughput
+		eventLoop = dev.eventLoopThroughput
 	default:
 		return errors.New("no valid run mode specified")
 	}
@@ -762,6 +777,8 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 	done.Add(1)
 	go func() {
 		defer func() {
+			dev.Release()
+
 			close(pktCh)
 
 			done.Done()
@@ -772,7 +789,7 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 			case <-ctx.Done():
 				return
 			default:
-				if err = eventHandler(pktCh); err != nil {
+				if err = eventLoop(pktCh); err != nil {
 					return
 				}
 			}
@@ -881,7 +898,11 @@ RUN:
 					Port: int(udp.DstPort),
 				}
 			default:
-				log.Printf("unsuppored transport: %x", pkt.Protocol)
+				log.Printf(
+					"HwTS[%s] unsuppored transport[%#02x]: %s -> %s",
+					pkt.GetTimestamp(), byte(pkt.Protocol),
+					pkt.SrcAddr, pkt.DstAddr,
+				)
 
 				goto RELEASE
 			}

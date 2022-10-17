@@ -228,14 +228,17 @@ type Device struct {
 
 func (dev *Device) closeDH() {
 	C.ef_driver_close(dev.dh)
+	dev.dh = 0
 }
 
 func (dev *Device) freePD() {
 	C.ef_pd_free((*C.struct_ef_pd)(dev.pd), dev.dh)
+	dev.pd = nil
 }
 
 func (dev *Device) freeVI() {
 	C.ef_vi_free((*C.struct_ef_vi)(dev.vi), dev.dh)
+	dev.vi = nil
 }
 
 func (dev *Device) Release() {
@@ -341,7 +344,7 @@ func (dev *Device) handleBatchRx(pktBufIdx int, pktCh chan<- *pkt4go.IPv4Packet)
 
 func (dev *Device) handleRxDiscard(pktBufIdx, len int, typ EFRxDiscardType) error {
 	if verbose {
-		log.Printf("Packet discarded due to: %s", typ)
+		log.Printf("Packet discarded due to: %#04x", uint16(typ))
 	}
 
 	pktBuf, err := dev.pktBufFromID(pktBufIdx)

@@ -435,48 +435,111 @@ func (dev *Device) pollEvq(pktCh chan<- *pkt4go.IPv4Packet) (int, error) {
 	return eventCount, nil
 }
 
-func (dev *Device) eventLoopThroughput(pktCh chan<- *pkt4go.IPv4Packet) error {
+func (dev *Device) eventLoopThroughput(ctx context.Context, pktCh chan<- *pkt4go.IPv4Packet) error {
 	evtLookAhead := EV_POLL_BATCH_SIZE + 7
 
-	for dev.refillRxRing(); true; dev.refillRxRing() {
-		dev.batchLoops--
-		/* Avoid reading entries in the EVQ that are in the same cache line
-		 * that the network adapter is writing to.
-		 */
-		if C.ef_eventq_has_many_events((*C.struct_ef_vi)(dev.vi), C.int(evtLookAhead)) != 0 || dev.batchLoops == 0 {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			dev.refillRxRing()
+
+			dev.batchLoops--
+
+			/* Avoid reading entries in the EVQ that are in the same cache line
+			 * that the network adapter is writing to.
+			 */
+			if C.ef_eventq_has_many_events((*C.struct_ef_vi)(dev.vi), C.int(evtLookAhead)) != 0 || dev.batchLoops == 0 {
+				if _, err := dev.pollEvq(pktCh); err != nil {
+					return err
+				}
+
+				dev.batchLoops = 100
+			}
+		}
+	}
+}
+
+func (dev *Device) eventLoopLowLatency(ctx context.Context, pktCh chan<- *pkt4go.IPv4Packet) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			dev.refillRxRing()
+
 			if _, err := dev.pollEvq(pktCh); err != nil {
 				return err
 			}
-
-			dev.batchLoops = 100
 		}
 	}
-
-	return nil
 }
 
-func (dev *Device) eventLoopLowLatency(pktCh chan<- *pkt4go.IPv4Packet) error {
-	for dev.refillRxRing(); true; dev.refillRxRing() {
-		if _, err := dev.pollEvq(pktCh); err != nil {
-			return err
+func (dev *Device) eventLoopBlocking(ctx context.Context, pktCh chan<- *pkt4go.IPv4Packet) error {
+	var refilled bool
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			refilled = dev.refillRxRing()
+
+			evtCount, err := dev.pollEvq(pktCh)
+
+			if err != nil {
+				return err
+			}
+
+			if !refilled && evtCount == 0 {
+				if err := try(C.ef_eventq_wait(
+					(*C.struct_ef_vi)(dev.vi), dev.dh,
+					C.ef_eventq_current((*C.struct_ef_vi)(dev.vi)), nil,
+				)); err != nil {
+					return err
+				}
+			}
 		}
 	}
-
-	return nil
 }
 
-func (dev *Device) eventLoopBlocking(pktCh chan<- *pkt4go.IPv4Packet) error {
-	for refilled := dev.refillRxRing(); true; refilled = dev.refillRxRing() {
-		evtCount, err := dev.pollEvq(pktCh)
+func (dev *Device) eventLoopBlockingPoll(ctx context.Context, pktCh chan<- *pkt4go.IPv4Packet) error {
+	pollFD := C.struct_pollfd{fd: dev.dh, events: C.POLLIN, revents: 0}
 
-		if err != nil {
-			return err
-		}
+	if err := try(C.ef_vi_prime(
+		(*C.struct_ef_vi)(dev.vi),
+		dev.dh, C.ef_eventq_current((*C.struct_ef_vi)(dev.vi)))); err != nil {
+		return err
+	}
 
-		if !refilled && evtCount == 0 {
-			if err := try(C.ef_eventq_wait(
+POLL:
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			if err := try(C.poll(&pollFD, 1, -1)); err != nil {
+				return err
+			}
+
+			if pollFD.events&C.POLLIN == 0 {
+				continue POLL
+			}
+
+			for {
+				refilled := dev.refillRxRing()
+
+				if evtCount, err := dev.pollEvq(pktCh); err != nil {
+					break POLL
+				} else if evtCount == 0 && !refilled {
+					break
+				}
+			}
+
+			if err := try(C.ef_vi_prime(
 				(*C.struct_ef_vi)(dev.vi), dev.dh,
-				C.ef_eventq_current((*C.struct_ef_vi)(dev.vi)), nil,
+				C.ef_eventq_current((*C.struct_ef_vi)(dev.vi)),
 			)); err != nil {
 				return err
 			}
@@ -484,42 +547,6 @@ func (dev *Device) eventLoopBlocking(pktCh chan<- *pkt4go.IPv4Packet) error {
 	}
 
 	return nil
-}
-
-func (dev *Device) eventLoopBlockingPoll(pktCh chan<- *pkt4go.IPv4Packet) (err error) {
-	pollFD := C.struct_pollfd{fd: dev.dh, events: C.POLLIN, revents: 0}
-
-	if err = try(C.ef_vi_prime((*C.struct_ef_vi)(dev.vi), dev.dh, C.ef_eventq_current((*C.struct_ef_vi)(dev.vi)))); err != nil {
-		return err
-	}
-
-POLL:
-	for err = try(C.poll(&pollFD, 1, -1)); err == nil; err = try(C.poll(&pollFD, 1, -1)) {
-		if pollFD.events&C.POLLIN == 0 {
-			continue
-		}
-
-		var evtCount int
-
-		for refilled := dev.refillRxRing(); true; refilled = dev.refillRxRing() {
-			if evtCount, err = dev.pollEvq(pktCh); err != nil {
-				break POLL
-			}
-
-			if evtCount == 0 && !refilled {
-				break
-			}
-		}
-
-		if err = try(C.ef_vi_prime(
-			(*C.struct_ef_vi)(dev.vi), dev.dh,
-			C.ef_eventq_current((*C.struct_ef_vi)(dev.vi)),
-		)); err != nil {
-			break
-		}
-	}
-
-	return
 }
 
 // EventType Possible types of events
@@ -760,7 +787,7 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 
 	pktCh := make(chan *pkt4go.IPv4Packet, defaultPktBufferLen)
 
-	var eventLoop func(chan<- *pkt4go.IPv4Packet) error
+	var eventLoop func(context.Context, chan<- *pkt4go.IPv4Packet) error
 
 	switch runMode {
 	case EvqWait:
@@ -787,16 +814,7 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 			done.Done()
 		}()
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				if err = eventLoop(pktCh); err != nil {
-					return
-				}
-			}
-		}
+		err = eventLoop(ctx, pktCh)
 	}()
 
 	var (

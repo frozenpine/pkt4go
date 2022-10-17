@@ -516,7 +516,6 @@ func (dev *Device) eventLoopBlockingPoll(ctx context.Context, pktCh chan<- *pkt4
 		return err
 	}
 
-POLL:
 	for {
 		select {
 		case <-ctx.Done():
@@ -527,14 +526,14 @@ POLL:
 			}
 
 			if pollFD.events&C.POLLIN == 0 {
-				continue POLL
+				continue
 			}
 
 			for {
 				refilled := dev.refillRxRing()
 
 				if evtCount, err := dev.pollEvq(pktCh); err != nil {
-					break POLL
+					return err
 				} else if evtCount == 0 && !refilled {
 					break
 				}
@@ -548,8 +547,6 @@ POLL:
 			}
 		}
 	}
-
-	return nil
 }
 
 // EventType Possible types of events

@@ -10,7 +10,7 @@
  */
 #ifndef __USE_POSIX199309
 #define __USE_POSIX199309
-#
+#endif
 #include <bits/time.h>
 #include <getopt.h>
 #include <pthread.h>
@@ -548,7 +548,10 @@ int main(int argc, char *argv[])
                                EF_PD_DEFAULT, cfg_vlan_id));
   else
     TRY(ef_pd_alloc_by_name(&res->pd, res->dh, interface, EF_PD_DEFAULT));
+  // TRY(ef_pd_alloc_by_name(&res->pd, res->dh, interface, EF_PD_PHYS_MODE));
+
   vi_flags = EF_VI_FLAGS_DEFAULT;
+  // vi_flags = EF_VI_RX_PHYS_ADDR;
   if (cfg_timestamping)
     vi_flags |= EF_VI_RX_TIMESTAMPS;
   if (cfg_rx_merge)

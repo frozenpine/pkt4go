@@ -20,6 +20,10 @@ package onload
 #include <etherfabric/vi.h>
 #include <etherfabric/memreg.h>
 
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS 0x20
+#endif
+
 typedef struct pkt_buf
 {
 	// I/O address corresponding to the start of this pkt_buf struct
@@ -707,7 +711,7 @@ func CreateHandler(iface string) (*Device, error) {
 	allocSize := C.round_up(dev.nBufs*C.int(PKT_BUF_SIZE), C.int(hugePageSize))
 
 	dev.pktBufs = C.mmap(nil, allocSize, C.PROT_READ|C.PROT_WRITE,
-		/*MAP_ANONYMOUS |*/ C.MAP_PRIVATE|C.MAP_HUGETLB, -1, 0)
+		C.MAP_ANONYMOUS|C.MAP_PRIVATE|C.MAP_HUGETLB, -1, 0)
 	if dev.pktBufs == C.MAP_FAILED {
 		log.Printf("Require mmap failed, are huge pages configured?")
 

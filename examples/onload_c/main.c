@@ -16,6 +16,10 @@
 #include <pthread.h>
 #include <poll.h>
 
+#ifndef MAP_ANONYMOUS
+#define MAP_ANONYMOUS 0x20
+#endif
+
 #include <etherfabric/vi.h>
 #include <etherfabric/pd.h>
 #include <etherfabric/memreg.h>
@@ -593,7 +597,7 @@ int main(int argc, char *argv[])
   size_t alloc_size = res->pkt_bufs_n * PKT_BUF_SIZE;
   alloc_size = ROUND_UP(alloc_size, huge_page_size);
   res->pkt_bufs = mmap(NULL, alloc_size, PROT_READ | PROT_WRITE,
-                       /*MAP_ANONYMOUS |*/ MAP_PRIVATE | MAP_HUGETLB, -1, 0);
+                       MAP_ANONYMOUS | MAP_PRIVATE | MAP_HUGETLB, -1, 0);
   if (res->pkt_bufs == MAP_FAILED)
   {
     LOGW("mmap() failed. Are huge pages configured?\n");

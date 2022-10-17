@@ -20,6 +20,9 @@
 # Go workspace file
 go.work
 .vscode
+.fleet
 
 examples/exanic_go/exanic_go
 examples/exanic_c/exanic_c
+examples/onload_c/onload_c
+examples/onload_go/onload_go

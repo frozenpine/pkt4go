@@ -45,8 +45,8 @@ type EtherType uint16
 
 //go:generate stringer -type EtherType -linecomment
 const (
-	ProtoIP EtherType = 0x0800 // ip
-	ProtoARP EtherType = 0x0806 // arp
+	ProtoIP   EtherType = 0x0800 // ip
+	ProtoARP  EtherType = 0x0806 // arp
 	ProtoRARP EtherType = 0x0835 // rarp
 )
 
@@ -316,6 +316,7 @@ type EtherFrame struct {
 	Buffer    []byte
 	Timestamp time.Time
 	nextLayer *IPv4Packet
+	release   func()
 }
 
 func (frm *EtherFrame) Release() {
@@ -323,6 +324,14 @@ func (frm *EtherFrame) Release() {
 
 	etherFrmPool.Put(frm)
 	payloadPool.Put(frm.Buffer)
+
+	if frm.release != nil {
+		frm.release()
+	}
+}
+
+func (frm *EtherFrame) DelegateRelease(fn func()) {
+	frm.release = fn
 }
 
 func (frm *EtherFrame) PreLayer() PktData {
@@ -523,8 +532,16 @@ func GetMTU() int {
 	return mtu
 }
 
-func CreateEtherFrame() *EtherFrame {
+func CreateEmptyEtherFrame() *EtherFrame {
 	return etherFrmPool.Get().(*EtherFrame)
+}
+
+func CreateEtherFrame(buffer []byte, ts time.Time) *EtherFrame {
+	frm := CreateEmptyEtherFrame()
+	frm.Timestamp = ts
+	frm.Buffer = buffer
+
+	return frm
 }
 
 func CreateIPv4Packet(frm *EtherFrame) *IPv4Packet {

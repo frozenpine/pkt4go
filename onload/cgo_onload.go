@@ -285,14 +285,17 @@ func (dev *Device) handleRx(pktBufIdx, len int, pktCh chan<- *pkt4go.IPv4Packet)
 	}
 
 	ts := time.Unix(int64(hwTS.tv_sec), int64(hwTS.tv_nsec))
+	// payload := C.GoBytes(pktBuf.rx_ptr, C.int(len))
 	payload := *(*[]byte)(unsafe.Pointer(
 		&reflect.SliceHeader{
 			Data: uintptr(pktBuf.rx_ptr),
-			Len:  len, Cap: len,
+			Len:  len,
+			Cap:  len,
 		},
 	))
 
 	frm := pkt4go.CreateEtherFrame(payload, ts)
+
 	frm.DelegateRelease(func() {
 		dev.releasePktBuf(pktBuf)
 	})
@@ -921,7 +924,11 @@ RUN:
 			}
 
 		RELEASE:
-			segment.Release()
+			if segment != nil {
+				segment.Release()
+			} else {
+				pkt.Release()
+			}
 		}
 	}
 

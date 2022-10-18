@@ -122,6 +122,10 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 				src = &net.TCPAddr{IP: ip.SrcIP, Port: int(tcp.SrcPort)}
 				dst = &net.TCPAddr{IP: ip.DstIP, Port: int(tcp.DstPort)}
 
+				if len(tcp.Payload) <= 0 {
+					continue
+				}
+
 				flowHash = tcp.TransportFlow().FastHash()
 
 				switch pkt4go.TCPDataMode {
@@ -137,19 +141,19 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 						delete(sessionBuffers, flowHash)
 						continue
 					}
+
+					if buffer, bufferExist = sessionBuffers[flowHash]; !bufferExist {
+						continue
+					} else {
+						buffer = append(buffer, tcp.Payload...)
+					}
 				case pkt4go.TCPRawData:
-					sessionBuffers[flowHash] = make([]byte, 0, defaultTCPBufferLen)
+					if buffer, bufferExist = sessionBuffers[flowHash]; bufferExist {
+						buffer = append(buffer, tcp.Payload...)
+					} else {
+						buffer = tcp.Payload
+					}
 				}
-
-				if len(tcp.Payload) <= 0 {
-					continue
-				}
-
-				buffer, bufferExist = sessionBuffers[flowHash]
-				if !bufferExist {
-					continue
-				}
-				buffer = append(buffer, tcp.Payload...)
 			case layers.LayerTypeUDP:
 				udp, _ := pkg.Layer(layers.LayerTypeUDP).(*layers.UDP)
 				src = &net.UDPAddr{IP: ip.SrcIP, Port: int(udp.SrcPort)}

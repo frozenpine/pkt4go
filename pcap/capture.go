@@ -124,16 +124,21 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 
 				flowHash = tcp.TransportFlow().FastHash()
 
-				// 检查3次握手的ack, 确保buffer从头开始
-				if tcp.SYN && tcp.ACK {
-					sessionBuffers[flowHash] = make([]byte, 0, defaultTCPBufferLen)
-					continue
-				}
+				switch pkt4go.TCPDataMode {
+				case pkt4go.TCPFullData:
+					// 检查3次握手的ack, 确保buffer从头开始
+					if tcp.SYN && tcp.ACK {
+						sessionBuffers[flowHash] = make([]byte, 0, defaultTCPBufferLen)
+						continue
+					}
 
-				// TCP会话结束, 清理session cache
-				if tcp.FIN && tcp.ACK {
-					delete(sessionBuffers, flowHash)
-					continue
+					// TCP会话结束, 清理session cache
+					if tcp.FIN && tcp.ACK {
+						delete(sessionBuffers, flowHash)
+						continue
+					}
+				case pkt4go.TCPRawData:
+					sessionBuffers[flowHash] = make([]byte, 0, defaultTCPBufferLen)
 				}
 
 				if len(tcp.Payload) <= 0 {

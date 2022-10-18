@@ -122,29 +122,38 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 				src = &net.TCPAddr{IP: ip.SrcIP, Port: int(tcp.SrcPort)}
 				dst = &net.TCPAddr{IP: ip.DstIP, Port: int(tcp.DstPort)}
 
-				flowHash = tcp.TransportFlow().FastHash()
-
-				// 检查3次握手的ack, 确保buffer从头开始
-				if tcp.SYN && tcp.ACK {
-					sessionBuffers[flowHash] = make([]byte, 0, defaultTCPBufferLen)
-					continue
-				}
-
-				// TCP会话结束, 清理session cache
-				if tcp.FIN && tcp.ACK {
-					delete(sessionBuffers, flowHash)
-					continue
-				}
-
 				if len(tcp.Payload) <= 0 {
 					continue
 				}
 
-				buffer, bufferExist = sessionBuffers[flowHash]
-				if !bufferExist {
-					continue
+				flowHash = tcp.TransportFlow().FastHash()
+
+				switch pkt4go.TCPDataMode {
+				case pkt4go.TCPFullData:
+					// 检查3次握手的ack, 确保buffer从头开始
+					if tcp.SYN && tcp.ACK {
+						sessionBuffers[flowHash] = make([]byte, 0, defaultTCPBufferLen)
+						continue
+					}
+
+					// TCP会话结束, 清理session cache
+					if tcp.FIN && tcp.ACK {
+						delete(sessionBuffers, flowHash)
+						continue
+					}
+
+					if buffer, bufferExist = sessionBuffers[flowHash]; !bufferExist {
+						continue
+					} else {
+						buffer = append(buffer, tcp.Payload...)
+					}
+				case pkt4go.TCPRawData:
+					if buffer, bufferExist = sessionBuffers[flowHash]; bufferExist {
+						buffer = append(buffer, tcp.Payload...)
+					} else {
+						buffer = tcp.Payload
+					}
 				}
-				buffer = append(buffer, tcp.Payload...)
 			case layers.LayerTypeUDP:
 				udp, _ := pkg.Layer(layers.LayerTypeUDP).(*layers.UDP)
 				src = &net.UDPAddr{IP: ip.SrcIP, Port: int(udp.SrcPort)}

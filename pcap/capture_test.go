@@ -6,32 +6,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/frozenpine/pkt4go"
 	"github.com/frozenpine/pkt4go/pcap"
 )
 
-func TestCaputureTime(t *testing.T) {
-	source := "file://../smdp/mdqp_snapshot.pcap"
-	filter := "tcp and src host 192.168.11.73 and dst host 172.16.100.44"
+func TestCaptureFile(t *testing.T) {
+	source := "file://offer_ens2f1_20221017.pcap"
+	filter := "tcp and host 172.16.33.69"
 
 	handler, err := pcap.CreateHandler(source)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	smdpHandler := func(src, dst net.Addr, ts time.Time, data []byte) (int, error) {
-
+	dataHandler := func(src, dst net.Addr, ts time.Time, data []byte) (int, error) {
 		t.Logf("%s %s -> %s: %d", ts, src, dst, len(data))
 		return len(data), nil
 	}
 
-	ctx, cancle := context.WithCancel(context.Background())
+	pkt4go.TCPDataMode = pkt4go.TCPRawData
 
-	go func() {
-		<-time.After(time.Second)
-		cancle()
-	}()
-
-	if err := pcap.StartCapture(ctx, handler, filter, smdpHandler); err != nil {
+	if err := pcap.StartCapture(context.TODO(), handler, filter, dataHandler); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -17,6 +17,19 @@ import (
 // DataHandler transport payload handler
 type DataHandler func(src, dst net.Addr, ts time.Time, data []byte) (int, error)
 
+type DataMode uint
+
+const (
+	TCPFullData DataMode = iota
+	TCPRawData
+)
+
+const defaultDataMode = TCPFullData
+
+var (
+	TCPDataMode = defaultDataMode
+)
+
 var (
 	EtherHeaderSize    = binary.Size(EtherHeader{})
 	IPv4HeaderBaseSize = binary.Size(IPv4Header{})

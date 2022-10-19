@@ -9,52 +9,73 @@ import (
 )
 
 func NByte(buffer []byte, offset *int) uint8 {
-	result := buffer[*offset]
+	idx := 0
 
 	if offset != nil {
+		idx = *offset
 		(*offset)++
 	}
+
+	result := buffer[idx]
 
 	return result
 }
 
 func N2HShort(buffer []byte, offset *int) uint16 {
-	result := binary.BigEndian.Uint16(buffer[*offset:])
+	idx := 0
 
-	(*offset) += 2
+	if offset != nil {
+		idx = *offset
+		(*offset) += 2
+	}
+
+	result := binary.BigEndian.Uint16(buffer[idx:])
 
 	return result
 }
 
 func N2HLong(buffer []byte, offset *int) uint32 {
-	result := binary.BigEndian.Uint32(buffer[*offset:])
+	idx := 0
 
 	if offset != nil {
+		idx = *offset
 		(*offset) += 4
 	}
+
+	result := binary.BigEndian.Uint32(buffer[idx:])
 
 	return result
 }
 
 func ReadBytes(dst []byte, buffer []byte, offset *int) error {
+	idx := 0
+
+	if offset != nil {
+		idx = *offset
+	}
+	buffer = buffer[idx:]
+
 	if len(buffer) < len(dst) {
 		return errors.New("insufficient data length")
 	}
 
-	if offset != nil {
-		*offset += copy(dst, buffer)
+	if copyLen := copy(dst, buffer); offset != nil {
+		*offset += copyLen
 	}
 
 	return nil
 }
 
 func N2HDouble(buffer []byte, offset *int) float64 {
-	bits := binary.BigEndian.Uint64(buffer)
-	result := math.Float64frombits(bits)
+	idx := 0
 
 	if offset != nil {
+		idx = *offset
 		*offset += 8
 	}
+
+	bits := binary.BigEndian.Uint64(buffer[idx:])
+	result := math.Float64frombits(bits)
 
 	return result
 }

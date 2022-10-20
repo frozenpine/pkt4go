@@ -34,6 +34,19 @@ func N2HShort(buffer []byte, offset *int) uint16 {
 	return result
 }
 
+func ReadShort(buffer []byte, offset *int) uint16 {
+	idx := 0
+
+	if offset != nil {
+		idx = *offset
+		(*offset) += 2
+	}
+
+	result := binary.LittleEndian.Uint16(buffer[idx:])
+
+	return result
+}
+
 func N2HLong(buffer []byte, offset *int) uint32 {
 	idx := 0
 
@@ -43,6 +56,19 @@ func N2HLong(buffer []byte, offset *int) uint32 {
 	}
 
 	result := binary.BigEndian.Uint32(buffer[idx:])
+
+	return result
+}
+
+func ReadLong(buffer []byte, offset *int) uint32 {
+	idx := 0
+
+	if offset != nil {
+		idx = *offset
+		(*offset) += 4
+	}
+
+	result := binary.LittleEndian.Uint32(buffer[idx:])
 
 	return result
 }
@@ -75,6 +101,20 @@ func N2HDouble(buffer []byte, offset *int) float64 {
 	}
 
 	bits := binary.BigEndian.Uint64(buffer[idx:])
+	result := math.Float64frombits(bits)
+
+	return result
+}
+
+func ReadDouble(buffer []byte, offset *int) float64 {
+	idx := 0
+
+	if offset != nil {
+		idx = *offset
+		*offset += 8
+	}
+
+	bits := binary.LittleEndian.Uint64(buffer[idx:])
 	result := math.Float64frombits(bits)
 
 	return result

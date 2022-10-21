@@ -3,121 +3,121 @@ package pkt4go
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 	"math"
-
-	"github.com/pkg/errors"
 )
 
-func NByte(buffer []byte, offset *int) uint8 {
-	idx := 0
-
-	if offset != nil {
-		idx = *offset
-		(*offset)++
-	}
-
-	result := buffer[idx]
-
-	return result
+type Buffer struct {
+	origin *bytes.Buffer
+	data   []byte
 }
 
-func N2HShort(buffer []byte, offset *int) uint16 {
-	idx := 0
-
-	if offset != nil {
-		idx = *offset
-		(*offset) += 2
+func NewBuffer(data []byte) *Buffer {
+	buffer := Buffer{
+		data:   data,
+		origin: bytes.NewBuffer(data),
 	}
 
-	result := binary.BigEndian.Uint16(buffer[idx:])
-
-	return result
+	return &buffer
 }
 
-func ReadShort(buffer []byte, offset *int) uint16 {
-	idx := 0
-
-	if offset != nil {
-		idx = *offset
-		(*offset) += 2
-	}
-
-	result := binary.LittleEndian.Uint16(buffer[idx:])
-
-	return result
+func (buf *Buffer) Offset() int {
+	return buf.Cap() - buf.Len()
 }
 
-func N2HLong(buffer []byte, offset *int) uint32 {
-	idx := 0
-
-	if offset != nil {
-		idx = *offset
-		(*offset) += 4
+func (buf *Buffer) ReadByte() uint8 {
+	if v, err := buf.origin.ReadByte(); err != nil {
+		panic(err)
+	} else {
+		return v
 	}
-
-	result := binary.BigEndian.Uint32(buffer[idx:])
-
-	return result
 }
 
-func ReadLong(buffer []byte, offset *int) uint32 {
-	idx := 0
+func (buf *Buffer) ReadNShort() uint16 {
+	v := binary.BigEndian.Uint16(buf.origin.Next(2))
 
-	if offset != nil {
-		idx = *offset
-		(*offset) += 4
-	}
-
-	result := binary.LittleEndian.Uint32(buffer[idx:])
-
-	return result
+	return v
 }
 
-func ReadBytes(dst []byte, buffer []byte, offset *int) error {
-	idx := 0
+func (buf *Buffer) ReadHShort() uint16 {
+	v := binary.LittleEndian.Uint16(buf.origin.Next(2))
 
-	if offset != nil {
-		idx = *offset
-	}
-	buffer = buffer[idx:]
-
-	if len(buffer) < len(dst) {
-		return errors.New("insufficient data length")
-	}
-
-	if copyLen := copy(dst, buffer); offset != nil {
-		*offset += copyLen
-	}
-
-	return nil
+	return v
 }
 
-func N2HDouble(buffer []byte, offset *int) float64 {
-	idx := 0
+func (buf *Buffer) ReadNLong() uint32 {
+	v := binary.BigEndian.Uint32(buf.origin.Next(4))
 
-	if offset != nil {
-		idx = *offset
-		*offset += 8
-	}
+	return v
+}
 
-	bits := binary.BigEndian.Uint64(buffer[idx:])
+func (buf *Buffer) ReadHLong() uint32 {
+	v := binary.LittleEndian.Uint32(buf.origin.Next(4))
+
+	return v
+}
+
+func (buf *Buffer) ReadNDouble() float64 {
+	bits := binary.BigEndian.Uint64(buf.origin.Next(8))
 	result := math.Float64frombits(bits)
 
 	return result
 }
 
-func ReadDouble(buffer []byte, offset *int) float64 {
-	idx := 0
-
-	if offset != nil {
-		idx = *offset
-		*offset += 8
-	}
-
-	bits := binary.LittleEndian.Uint64(buffer[idx:])
+func (buf *Buffer) ReadHDouble() float64 {
+	bits := binary.LittleEndian.Uint64(buf.origin.Next(8))
 	result := math.Float64frombits(bits)
 
 	return result
+}
+
+func (buf *Buffer) Read(p []byte) (n int, err error) {
+	n, err = buf.origin.Read(p)
+
+	return
+}
+
+func (buf *Buffer) ReadCStr(n int) string {
+	p := make([]byte, n)
+	var err error
+
+	_, err = buf.Read(p)
+
+	if err != nil && err != io.EOF {
+		panic(err)
+	}
+
+	return CStr2GoStr(p)
+}
+
+func (buf *Buffer) Cap() int {
+	return buf.origin.Cap()
+}
+
+func (buf *Buffer) Len() int {
+	return buf.origin.Len()
+}
+
+func (buf *Buffer) Next(n int) []byte {
+	v := buf.origin.Next(n)
+
+	return v
+}
+
+func (buf *Buffer) Reset() {
+	buf.origin = bytes.NewBuffer(buf.data)
+}
+
+func (buf *Buffer) Unread(n int) {
+	offset := buf.Offset()
+
+	buf.Reset()
+
+	if n >= offset {
+		return
+	}
+
+	buf.Next(offset - n)
 }
 
 func findCStrTerm(in []byte) (idx int) {

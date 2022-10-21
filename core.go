@@ -73,21 +73,20 @@ type EtherHeader struct {
 	Type EtherType
 }
 
-func (hdr *EtherFrame) Unpack(buff []byte) error {
-	buffLen := len(buff)
-	if buffLen < EtherHeaderSize {
+func (hdr *EtherFrame) Unpack(data []byte) error {
+	buf := NewBuffer(data)
+
+	if buf.Cap() < EtherHeaderSize {
 		return errors.WithStack(ErrInsufficentData)
 	}
 
-	offset := 0
+	buf.Read(hdr.DstHost[:])
 
-	offset += copy(hdr.DstHost[:], buff[offset:])
+	buf.Read(hdr.SrcHost[:])
 
-	offset += copy(hdr.SrcHost[:], buff[offset:])
+	hdr.Type = EtherType(buf.ReadNShort())
 
-	hdr.Type = EtherType(N2HShort(buff, &offset))
-
-	if offset != EtherHeaderSize {
+	if offset := buf.Offset(); offset != EtherHeaderSize {
 		panic(errors.Wrap(
 			ErrUnpackOffset,
 			fmt.Sprintf(
@@ -142,34 +141,33 @@ type IPv4Header struct {
 	DstAddr IPv4Addr
 }
 
-func (hdr *IPv4Header) Unpack(buff []byte) error {
-	buffSize := len(buff)
-	if buffSize < IPv4HeaderBaseSize {
+func (hdr *IPv4Header) Unpack(data []byte) error {
+	buf := NewBuffer(data)
+
+	if buf.Cap() < IPv4HeaderBaseSize {
 		return errors.WithStack(ErrInsufficentData)
 	}
 
-	offset := 0
+	hdr.VerIHL = buf.ReadByte()
 
-	hdr.VerIHL = NByte(buff, &offset)
+	hdr.TOS = buf.ReadByte()
 
-	hdr.TOS = NByte(buff, &offset)
+	hdr.TotalLength = buf.ReadNShort()
 
-	hdr.TotalLength = N2HShort(buff, &offset)
+	hdr.Identification = buf.ReadNShort()
 
-	hdr.Identification = N2HShort(buff, &offset)
+	hdr.Flags = buf.ReadNShort()
 
-	hdr.Flags = N2HShort(buff, &offset)
+	hdr.TTL = buf.ReadByte()
 
-	hdr.TTL = NByte(buff, &offset)
+	hdr.Protocol = TransProto(buf.ReadByte())
 
-	hdr.Protocol = TransProto(NByte(buff, &offset))
+	hdr.CRC = buf.ReadNShort()
 
-	hdr.CRC = N2HShort(buff, &offset)
+	buf.Read(hdr.SrcAddr[:])
+	buf.Read(hdr.DstAddr[:])
 
-	offset += copy(hdr.SrcAddr[:], buff[offset:])
-	offset += copy(hdr.DstAddr[:], buff[offset:])
-
-	if offset != IPv4HeaderBaseSize {
+	if offset := buf.Offset(); offset != IPv4HeaderBaseSize {
 		panic(errors.Wrap(
 			ErrUnpackOffset,
 			fmt.Sprintf(
@@ -230,32 +228,30 @@ type TCPHeader struct {
 	Checksum uint16
 }
 
-func (hdr *TCPHeader) Unpack(buff []byte) error {
-	buffLen := len(buff)
+func (hdr *TCPHeader) Unpack(data []byte) error {
+	buf := NewBuffer(data)
 
-	if buffLen < TCPHeaderBaseSize {
+	if buf.Cap() < TCPHeaderBaseSize {
 		return errors.WithStack(ErrInsufficentData)
 	}
 
-	offset := 0
+	hdr.SrcPort = buf.ReadNShort()
 
-	hdr.SrcPort = N2HShort(buff, &offset)
+	hdr.DstPort = buf.ReadNShort()
 
-	hdr.DstPort = N2HShort(buff, &offset)
+	hdr.Seq = TCPSeq(buf.ReadNLong())
 
-	hdr.Seq = TCPSeq(N2HLong(buff, &offset))
+	hdr.Ack = TCPSeq(buf.ReadNLong())
 
-	hdr.Ack = TCPSeq(N2HLong(buff, &offset))
+	hdr.Offset = TCPOffset(buf.ReadByte())
 
-	hdr.Offset = TCPOffset(NByte(buff, &offset))
+	hdr.Flags = TCPFlags(buf.ReadByte())
 
-	hdr.Flags = TCPFlags(NByte(buff, &offset))
+	hdr.Window = buf.ReadNShort()
 
-	hdr.Window = N2HShort(buff, &offset)
+	hdr.Checksum = buf.ReadNShort()
 
-	hdr.Checksum = N2HShort(buff, &offset)
-
-	if offset != TCPHeaderBaseSize {
+	if offset := buf.Offset(); offset != TCPHeaderBaseSize {
 		panic(errors.Wrap(
 			ErrUnpackOffset,
 			fmt.Sprintf(
@@ -283,23 +279,22 @@ type UDPHeader struct {
 	CRC uint16
 }
 
-func (hdr *UDPHeader) Unpack(buff []byte) error {
-	buffLen := len(buff)
-	if buffLen < UDPHeaderSize {
+func (hdr *UDPHeader) Unpack(data []byte) error {
+	buf := NewBuffer(data)
+
+	if buf.Cap() < UDPHeaderSize {
 		return errors.WithStack(ErrInsufficentData)
 	}
 
-	offset := 0
+	hdr.SrcPort = buf.ReadNShort()
 
-	hdr.SrcPort = N2HShort(buff, &offset)
+	hdr.DstPort = buf.ReadNShort()
 
-	hdr.DstPort = N2HShort(buff, &offset)
+	hdr.Len = buf.ReadNShort()
 
-	hdr.Len = N2HShort(buff, &offset)
+	hdr.CRC = buf.ReadNShort()
 
-	hdr.CRC = N2HShort(buff, &offset)
-
-	if offset != UDPHeaderSize {
+	if offset := buf.Offset(); offset != UDPHeaderSize {
 		panic(errors.Wrap(
 			ErrUnpackOffset,
 			fmt.Sprintf(

@@ -13,7 +13,7 @@ import (
 )
 
 type Session struct {
-	Protocol string
+	Protocol TransProto
 	SrcAddr  net.IP
 	SrcPort  uint16
 	DstAddr  net.IP
@@ -438,7 +438,7 @@ func (seg *TCPSegment) Flow() *Session {
 	ih := seg.preLayer
 
 	return &Session{
-		Protocol: TCP.String(),
+		Protocol: TCP,
 		SrcAddr:  net.IP(ih.SrcAddr[:]),
 		SrcPort:  seg.SrcPort,
 		DstAddr:  net.IP(ih.DstAddr[:]),
@@ -483,7 +483,7 @@ func (seg *UDPSegment) Flow() *Session {
 	ih := seg.preLayer
 
 	return &Session{
-		Protocol: UDP.String(),
+		Protocol: UDP,
 		SrcAddr:  net.IP(ih.SrcAddr[:]),
 		SrcPort:  seg.SrcPort,
 		DstAddr:  net.IP(ih.DstAddr[:]),

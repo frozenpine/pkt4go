@@ -118,7 +118,7 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 				}
 
 				session = &pkt4go.Session{
-					Protocol: pkt4go.TCP.String(),
+					Protocol: pkt4go.TCP,
 					SrcAddr:  ip.SrcIP,
 					SrcPort:  uint16(tcp.SrcPort),
 					DstAddr:  ip.DstIP,
@@ -134,7 +134,7 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 				}
 
 				session = &pkt4go.Session{
-					Protocol: pkt4go.UDP.String(),
+					Protocol: pkt4go.UDP,
 					SrcAddr:  ip.SrcIP,
 					SrcPort:  uint16(udp.SrcPort),
 					DstAddr:  ip.DstIP,

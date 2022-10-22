@@ -13,16 +13,14 @@ func TestSession(t *testing.T) {
 	copy(dst[:], net.ParseIP("192.168.1.2").To4())
 
 	session := pkt4go.Session{
-		Protocol: pkt4go.TCP,
-		SrcAddr:  src,
+		Protocol: pkt4go.TCP.String(),
+		SrcAddr:  net.IP(src[:]),
 		SrcPort:  1000,
-		DstAddr:  dst,
+		DstAddr:  net.IP(dst[:]),
 		DstPort:  2000,
 	}
 
-	hash := session.FastHash()
-
-	t.Log(hash)
+	t.Log(session)
 }
 
 func TestTypePrint(t *testing.T) {

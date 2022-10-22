@@ -4,31 +4,28 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
-	"reflect"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/pkg/errors"
 
 	origin_errors "errors"
 )
 
+type Session struct {
+	Protocol string
+	SrcAddr  net.IP
+	SrcPort  uint16
+	DstAddr  net.IP
+	DstPort  uint16
+}
+
+func (s *Session) String() string {
+	return fmt.Sprintf("[%s] %s:%d -> %s:%d", s.Protocol, s.SrcAddr, s.SrcPort, s.DstAddr, s.DstPort)
+}
+
 // DataHandler transport payload handler
-type DataHandler func(src, dst net.Addr, ts time.Time, data []byte) (int, error)
-
-type DataMode uint
-
-const (
-	TCPFullData DataMode = iota
-	TCPRawData
-)
-
-const defaultDataMode = TCPFullData
-
-var (
-	TCPDataMode = defaultDataMode
-)
+type DataHandler func(session *Session, ts time.Time, data []byte) (int, error)
 
 var (
 	EtherHeaderSize    = binary.Size(EtherHeader{})
@@ -399,39 +396,10 @@ func (pkt *IPv4Packet) GetTimestamp() time.Time {
 	return pkt.preLayer.GetTimestamp()
 }
 
-type Session struct {
-	Protocol TransProto
-	SrcAddr  IPv4Addr
-	SrcPort  uint16
-	DstAddr  IPv4Addr
-	DstPort  uint16
-}
-
 const (
 	fnvBasis = 14695981039346656037
 	fnvPrime = 1099511628211
 )
-
-func (s *Session) FastHash() (h uint64) {
-	size := int(unsafe.Sizeof(*s))
-
-	rawBytes := *(*[]byte)(unsafe.Pointer(
-		&reflect.SliceHeader{
-			Data: uintptr(unsafe.Pointer(s)),
-			Len:  size,
-			Cap:  size,
-		},
-	))
-
-	h = fnvBasis
-
-	for i := 0; i < len(rawBytes); i++ {
-		h ^= uint64(rawBytes[i])
-		h *= fnvPrime
-	}
-
-	return
-}
 
 type TCPSegment struct {
 	TCPHeader
@@ -470,10 +438,10 @@ func (seg *TCPSegment) Flow() *Session {
 	ih := seg.preLayer
 
 	return &Session{
-		Protocol: TCP,
-		SrcAddr:  ih.SrcAddr,
+		Protocol: TCP.String(),
+		SrcAddr:  net.IP(ih.SrcAddr[:]),
 		SrcPort:  seg.SrcPort,
-		DstAddr:  ih.DstAddr,
+		DstAddr:  net.IP(ih.DstAddr[:]),
 		DstPort:  seg.DstPort,
 	}
 }
@@ -515,10 +483,10 @@ func (seg *UDPSegment) Flow() *Session {
 	ih := seg.preLayer
 
 	return &Session{
-		Protocol: UDP,
-		SrcAddr:  ih.SrcAddr,
+		Protocol: UDP.String(),
+		SrcAddr:  net.IP(ih.SrcAddr[:]),
 		SrcPort:  seg.SrcPort,
-		DstAddr:  ih.DstAddr,
+		DstAddr:  net.IP(ih.DstAddr[:]),
 		DstPort:  seg.DstPort,
 	}
 }
@@ -532,6 +500,7 @@ var (
 	payloadPool  = sync.Pool{New: func() any { return make([]byte, mtu) }}
 )
 
+// SetMTU 设置MTU大小, 以确保整个以太帧能放入数据缓存
 func SetMTU(v int) {
 	mtu = v
 }
@@ -547,6 +516,7 @@ func CreateEmptyEtherFrame() *EtherFrame {
 func CreateEtherFrame(buffer []byte, ts time.Time) *EtherFrame {
 	frm := CreateEmptyEtherFrame()
 	frm.Timestamp = ts
+	payloadPool.Put(frm.Buffer)
 	frm.Buffer = buffer
 
 	return frm

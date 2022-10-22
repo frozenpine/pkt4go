@@ -74,7 +74,7 @@ func CreateHandler(dataSrc string) (handle *libpcap.Handle, err error) {
 	return
 }
 
-func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, fn pkt4go.DataHandler) error {
+func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, fn pkt4go.DataHandler) (err error) {
 	if err := handler.SetBPFFilter(filter); err != nil {
 		return errors.WithStack(err)
 	}
@@ -82,11 +82,6 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 	if ctx == nil {
 		ctx = context.Background()
 	}
-
-	var (
-		sessionBuffers = make(map[uint64][]byte)
-		err            error
-	)
 
 	packets := gopacket.NewPacketSource(handler, handler.LinkType()).Packets()
 
@@ -105,80 +100,60 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 
 			ip := pkg.Layer(layers.LayerTypeIPv4).(*layers.IPv4)
 			if ip == nil {
-				return errors.New("captured packet is not a valid IPv4 packet")
+				log.Printf("%+v", errors.New("captured packet is not a valid IPv4 packet"))
+				continue
 			}
 
 			var (
-				src, dst    net.Addr
-				usedSize    int
-				flowHash    uint64
-				buffer      []byte
-				bufferExist bool
+				session *pkt4go.Session
+				buffer  []byte
 			)
 
 			switch ip.NextLayerType() {
 			case layers.LayerTypeTCP:
 				tcp, _ := pkg.Layer(layers.LayerTypeTCP).(*layers.TCP)
-				src = &net.TCPAddr{IP: ip.SrcIP, Port: int(tcp.SrcPort)}
-				dst = &net.TCPAddr{IP: ip.DstIP, Port: int(tcp.DstPort)}
 
 				if len(tcp.Payload) <= 0 {
 					continue
 				}
 
-				flowHash = tcp.TransportFlow().FastHash()
-
-				switch pkt4go.TCPDataMode {
-				case pkt4go.TCPFullData:
-					// 检查3次握手的ack, 确保buffer从头开始
-					if tcp.SYN && tcp.ACK {
-						sessionBuffers[flowHash] = make([]byte, 0, defaultTCPBufferLen)
-						continue
-					}
-
-					// TCP会话结束, 清理session cache
-					if tcp.FIN && tcp.ACK {
-						delete(sessionBuffers, flowHash)
-						continue
-					}
-
-					if buffer, bufferExist = sessionBuffers[flowHash]; !bufferExist {
-						continue
-					} else {
-						buffer = append(buffer, tcp.Payload...)
-					}
-				case pkt4go.TCPRawData:
-					if buffer, bufferExist = sessionBuffers[flowHash]; bufferExist {
-						buffer = append(buffer, tcp.Payload...)
-					} else {
-						buffer = tcp.Payload
-					}
+				session = &pkt4go.Session{
+					Protocol: pkt4go.TCP.String(),
+					SrcAddr:  ip.SrcIP,
+					SrcPort:  uint16(tcp.SrcPort),
+					DstAddr:  ip.DstIP,
+					DstPort:  uint16(tcp.DstPort),
 				}
+
+				buffer = tcp.Payload
 			case layers.LayerTypeUDP:
 				udp, _ := pkg.Layer(layers.LayerTypeUDP).(*layers.UDP)
-				src = &net.UDPAddr{IP: ip.SrcIP, Port: int(udp.SrcPort)}
-				dst = &net.UDPAddr{IP: ip.DstIP, Port: int(udp.DstPort)}
 
-				flowHash = udp.TransportFlow().FastHash()
-				if buffer, bufferExist = sessionBuffers[flowHash]; bufferExist {
-					buffer = append(buffer, udp.Payload...)
-				} else {
-					buffer = udp.Payload
+				if len(udp.Payload) <= 0 {
+					continue
 				}
+
+				session = &pkt4go.Session{
+					Protocol: pkt4go.UDP.String(),
+					SrcAddr:  ip.SrcIP,
+					SrcPort:  uint16(udp.SrcPort),
+					DstAddr:  ip.DstIP,
+					DstPort:  uint16(udp.DstPort),
+				}
+
+				buffer = udp.Payload
 			default:
 				log.Println("unsupported Transport Layer: " + ip.NextLayerType().String())
 			}
 
-			usedSize, err = fn(src, dst, pkg.Metadata().Timestamp, buffer)
+			_, err = fn(session, pkg.Metadata().Timestamp, buffer)
 
 			if err != nil {
 				if err == io.EOF {
 					return nil
 				}
 
-				log.Printf("[%s] %s -> %s data handler failed: %v", pkg.Metadata().Timestamp, src, dst, err)
-			} else if len(buffer) != usedSize {
-				sessionBuffers[flowHash] = buffer[usedSize:]
+				log.Printf("[%s] %s data handler failed: %v", pkg.Metadata().Timestamp, session, err)
 			}
 		}
 	}

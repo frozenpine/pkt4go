@@ -7,11 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"os/signal"
 	"time"
 
+	"github.com/frozenpine/pkt4go"
 	"github.com/frozenpine/pkt4go/exanic"
 )
 
@@ -33,15 +33,8 @@ func init() {
 	flag.Parse()
 }
 
-func handler(src, dst net.Addr, ts time.Time, payload []byte) (int, error) {
-	switch dst.Network() {
-	case "tcp":
-		log.Printf("[TCP] %s %s -> %s: payload %d bytes", ts, src, dst, len(payload))
-	case "udp":
-		log.Printf("[UDP] %s %s -> %s: payload %d bytes", ts, src, dst, len(payload))
-	default:
-		log.Printf("%s %s -> %s: payload %d bytes", ts, src, dst, len(payload))
-	}
+func handler(session *pkt4go.Session, ts time.Time, payload []byte) (int, error) {
+	log.Printf("%s %s: payload %d bytes", ts, session, len(payload))
 
 	return len(payload), nil
 }

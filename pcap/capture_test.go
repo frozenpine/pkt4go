@@ -2,7 +2,6 @@ package pcap_test
 
 import (
 	"context"
-	"net"
 	"testing"
 	"time"
 
@@ -19,12 +18,10 @@ func TestCaptureFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dataHandler := func(src, dst net.Addr, ts time.Time, data []byte) (int, error) {
-		t.Logf("%s %s -> %s: %d", ts, src, dst, len(data))
+	dataHandler := func(session *pkt4go.Session, ts time.Time, data []byte) (int, error) {
+		t.Logf("%s %s: %d", ts, session, len(data))
 		return len(data), nil
 	}
-
-	pkt4go.TCPDataMode = pkt4go.TCPRawData
 
 	if err := pcap.StartCapture(context.TODO(), handler, filter, dataHandler); err != nil {
 		t.Fatal(err)

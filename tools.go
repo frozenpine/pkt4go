@@ -57,6 +57,18 @@ func (buf *Buffer) ReadHLong() uint32 {
 	return v
 }
 
+func (buf *Buffer) ReadNLongLong() uint64 {
+	v := binary.BigEndian.Uint64(buf.origin.Next(8))
+
+	return v
+}
+
+func (buf *Buffer) ReadHLongLong() uint64 {
+	v := binary.LittleEndian.Uint64(buf.origin.Next(8))
+
+	return v
+}
+
 func (buf *Buffer) ReadNDouble() float64 {
 	bits := binary.BigEndian.Uint64(buf.origin.Next(8))
 	result := math.Float64frombits(bits)

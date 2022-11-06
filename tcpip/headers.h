@@ -36,7 +36,7 @@ typedef struct EtherHeader
 	uint8_t ether_dhost[ETHER_ADDR_LEN]; /* Destination host address */
 	uint8_t ether_shost[ETHER_ADDR_LEN]; /* Source host address */
 	uint16_t ether_type;				 /* IP? ARP? RARP? etc */
-} EtherHeader;
+} ether_header_t;
 
 /* 4 bytes IP address */
 typedef struct IPAddress
@@ -45,7 +45,7 @@ typedef struct IPAddress
 	uint8_t byte2;
 	uint8_t byte3;
 	uint8_t byte4;
-} IPAddress;
+} ip_addr_t;
 
 /* IPv4 header */
 typedef struct IPHeader
@@ -62,7 +62,7 @@ typedef struct IPHeader
 	IPAddress saddr;		 // Source address
 	IPAddress daddr;		 // Destination address
 	uint32_t op_pad;		 // Option + Padding
-} IPHeader;
+} ip_header_t;
 
 /* TCP header */
 typedef uint32_t tcp_seq;
@@ -88,7 +88,7 @@ typedef struct TCPHeader
 	uint16_t win; /* window */
 	uint16_t sum; /* checksum */
 	uint16_t urp; /* urgent pointer */
-} TCPHeader;
+} tcp_header_t;
 
 /* UDP header*/
 typedef struct UDPHeader
@@ -97,7 +97,7 @@ typedef struct UDPHeader
 	uint16_t dport; // Destination port
 	uint16_t len;	// Datagram length
 	uint16_t crc;	// Checksum
-} UDPHeader;
+} udp_header_t;
 
 #define TH_SYN_ACK (TH_SYN | TH_ACK)
 #define TH_FIN_ACK (TH_FIN | TH_FIN)

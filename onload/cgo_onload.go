@@ -228,7 +228,8 @@ type Device struct {
 	rxPkts  uint64
 	rxBytes uint64
 
-	once sync.Once
+	once    sync.Once
+	isIOMMU bool
 }
 
 func (dev *Device) closeDH() {
@@ -636,20 +637,28 @@ const (
 	EF_EVENT_RX_DISCARD_MAX
 )
 
-func CreateHandler(iface string) (*Device, error) {
+// TODO: ef_vi in IOMMU
+func CreateHandler(iface string, isIOMMU bool) (*Device, error) {
 	if iface == "" {
 		return nil, errors.New("device can not be empty")
 	}
 
 	dev := Device{
-		pd:     C.malloc(C.sizeof_struct_ef_pd),
-		vi:     C.malloc(C.sizeof_struct_ef_vi),
-		memreg: C.malloc(C.sizeof_struct_ef_memreg),
+		pd:      C.malloc(C.sizeof_struct_ef_pd),
+		vi:      C.malloc(C.sizeof_struct_ef_vi),
+		memreg:  C.malloc(C.sizeof_struct_ef_memreg),
+		isIOMMU: isIOMMU,
 	}
 
 	if err := try(C.ef_driver_open(&dev.dh)); err != nil {
 		return nil, errors.Wrap(err, "driver open failed")
 	}
+
+	// pdFlag := C.EF_PD_DEFAULT
+
+	// if dev.isIOMMU {
+	// 	pdFlag = C.EF_PD_VF | C.EF_PD_VPORT
+	// }
 
 	if err := try(C.ef_pd_alloc_by_name(
 		(*C.struct_ef_pd)(dev.pd),
@@ -788,7 +797,7 @@ func StartCapture(ctx context.Context, dev *Device, filter string, fn pkt4go.Dat
 
 	defer dev.Release()
 
-	if efviFilter := createFilter(filter); efviFilter != nil {
+	if efviFilter := createFilter(filter); dev.isIOMMU && efviFilter != nil {
 		if err := try(C.ef_vi_filter_add((*C.struct_ef_vi)(dev.vi), dev.dh, efviFilter, nil)); err != nil {
 			return errors.Wrap(err, "add filter failed")
 		}

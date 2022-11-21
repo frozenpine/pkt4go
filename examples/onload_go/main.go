@@ -17,6 +17,7 @@ import (
 
 var (
 	iface       = ""
+	isIOMMU     = false
 	dryRun      = false
 	showVersion = false
 )
@@ -27,6 +28,7 @@ func init() {
 	flag.StringVar(&iface, "iface", "", "Interface name.")
 	flag.BoolVar(&dryRun, "dry", false, "Dry run without real capture.")
 	flag.BoolVar(&showVersion, "ver", false, "Get exanic version.")
+	flag.BoolVar(&isIOMMU, "iommu", true, "Run in SRIOV mode.")
 
 	flag.Parse()
 }
@@ -56,7 +58,7 @@ func main() {
 		log.Fatalln("interface can not be empty.")
 	}
 
-	if device, err = onload.CreateHandler(iface); err != nil {
+	if device, err = onload.CreateHandler(iface, isIOMMU); err != nil {
 		log.Fatalf("create handler failed: %v", err)
 	}
 

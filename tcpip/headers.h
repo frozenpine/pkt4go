@@ -59,8 +59,8 @@ typedef struct IPHeader
 	uint8_t ttl;			 // Time to live
 	uint8_t proto;			 // Protocol
 	uint16_t crc;			 // Header checksum
-	IPAddress saddr;		 // Source address
-	IPAddress daddr;		 // Destination address
+	ip_addr_t saddr;		 // Source address
+	ip_addr_t daddr;		 // Destination address
 	uint32_t op_pad;		 // Option + Padding
 } ip_header_t;
 

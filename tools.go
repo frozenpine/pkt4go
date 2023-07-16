@@ -116,6 +116,10 @@ func (buf *Buffer) Next(n int) []byte {
 	return v
 }
 
+func (buf *Buffer) Bytes() []byte {
+	return buf.origin.Bytes()
+}
+
 func (buf *Buffer) Reset() {
 	buf.origin = bytes.NewBuffer(buf.data)
 }

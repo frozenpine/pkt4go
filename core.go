@@ -396,11 +396,6 @@ func (pkt *IPv4Packet) GetTimestamp() time.Time {
 	return pkt.preLayer.GetTimestamp()
 }
 
-const (
-	fnvBasis = 14695981039346656037
-	fnvPrime = 1099511628211
-)
-
 type TCPSegment struct {
 	TCPHeader
 	preLayer  *IPv4Packet

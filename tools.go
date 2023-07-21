@@ -25,7 +25,19 @@ func (buf *Buffer) Offset() int {
 	return buf.Cap() - buf.Len()
 }
 
-func (buf *Buffer) ReadByte() uint8 {
+func (buf *Buffer) ReadByte() (byte, error) {
+	return buf.origin.ReadByte()
+}
+
+func (buf *Buffer) Bytes() []byte {
+	return buf.origin.Bytes()
+}
+
+func (buf *Buffer) ReadBytes(delim byte) ([]byte, error) {
+	return buf.origin.ReadBytes(delim)
+}
+
+func (buf *Buffer) ReadUint8() uint8 {
 	if v, err := buf.origin.ReadByte(); err != nil {
 		panic(err)
 	} else {
@@ -114,10 +126,6 @@ func (buf *Buffer) Next(n int) []byte {
 	v := buf.origin.Next(n)
 
 	return v
-}
-
-func (buf *Buffer) Bytes() []byte {
-	return buf.origin.Bytes()
 }
 
 func (buf *Buffer) Reset() {

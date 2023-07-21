@@ -145,9 +145,9 @@ func (hdr *IPv4Header) Unpack(data []byte) error {
 		return errors.WithStack(ErrInsufficentData)
 	}
 
-	hdr.VerIHL = buf.ReadByte()
+	hdr.VerIHL = buf.ReadUint8()
 
-	hdr.TOS = buf.ReadByte()
+	hdr.TOS = buf.ReadUint8()
 
 	hdr.TotalLength = buf.ReadNShort()
 
@@ -155,9 +155,9 @@ func (hdr *IPv4Header) Unpack(data []byte) error {
 
 	hdr.Flags = buf.ReadNShort()
 
-	hdr.TTL = buf.ReadByte()
+	hdr.TTL = buf.ReadUint8()
 
-	hdr.Protocol = TransProto(buf.ReadByte())
+	hdr.Protocol = TransProto(buf.ReadUint8())
 
 	hdr.CRC = buf.ReadNShort()
 
@@ -240,9 +240,9 @@ func (hdr *TCPHeader) Unpack(data []byte) error {
 
 	hdr.Ack = TCPSeq(buf.ReadNLong())
 
-	hdr.Offset = TCPOffset(buf.ReadByte())
+	hdr.Offset = TCPOffset(buf.ReadUint8())
 
-	hdr.Flags = TCPFlags(buf.ReadByte())
+	hdr.Flags = TCPFlags(buf.ReadUint8())
 
 	hdr.Window = buf.ReadNShort()
 

@@ -1,9 +1,11 @@
 package pkt4go
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -21,7 +23,18 @@ type Session struct {
 }
 
 func (s *Session) String() string {
-	return fmt.Sprintf("[%s] %s:%d -> %s:%d", s.Protocol, s.SrcAddr, s.SrcPort, s.DstAddr, s.DstPort)
+	buff := bytes.NewBufferString("[")
+	buff.WriteString(s.Protocol.String())
+	buff.WriteString("] ")
+	buff.WriteString(s.SrcAddr.String())
+	buff.WriteRune(':')
+	buff.WriteString(strconv.Itoa(int(s.SrcPort)))
+	buff.WriteString(" -> ")
+	buff.WriteString(s.DstAddr.String())
+	buff.WriteRune(':')
+	buff.WriteString(strconv.Itoa(int(s.DstPort)))
+
+	return buff.String()
 }
 
 // DataHandler transport payload handler

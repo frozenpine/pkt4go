@@ -108,11 +108,11 @@ func ServeMultiCast(ctx context.Context, listen, bind string, buffSize int, hand
 			}
 
 			session := pkt4go.Session{
-				Protocol: pkt4go.UDP,
-				SrcAddr:  src.IP,
-				SrcPort:  uint16(src.Port),
-				DstAddr:  listenAddr.IP,
-				DstPort:  uint16(listenAddr.Port),
+				Proto:   pkt4go.UDP,
+				SrcIP:   src.IP,
+				SrcPort: src.Port,
+				DstIP:   listenAddr.IP,
+				DstPort: listenAddr.Port,
 			}
 
 			if _, err := handler(&session, ts, buffer[:n]); err != nil {

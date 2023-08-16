@@ -118,11 +118,11 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 				}
 
 				session = &pkt4go.Session{
-					Protocol: pkt4go.TCP,
-					SrcAddr:  ip.SrcIP,
-					SrcPort:  uint16(tcp.SrcPort),
-					DstAddr:  ip.DstIP,
-					DstPort:  uint16(tcp.DstPort),
+					Proto:   pkt4go.TCP,
+					SrcIP:   ip.SrcIP,
+					SrcPort: int(tcp.SrcPort),
+					DstIP:   ip.DstIP,
+					DstPort: int(tcp.DstPort),
 				}
 
 				buffer = tcp.Payload
@@ -134,11 +134,11 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 				}
 
 				session = &pkt4go.Session{
-					Protocol: pkt4go.UDP,
-					SrcAddr:  ip.SrcIP,
-					SrcPort:  uint16(udp.SrcPort),
-					DstAddr:  ip.DstIP,
-					DstPort:  uint16(udp.DstPort),
+					Proto:   pkt4go.UDP,
+					SrcIP:   ip.SrcIP,
+					SrcPort: int(udp.SrcPort),
+					DstIP:   ip.DstIP,
+					DstPort: int(udp.DstPort),
 				}
 
 				buffer = udp.Payload

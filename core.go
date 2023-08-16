@@ -15,22 +15,44 @@ import (
 )
 
 type Session struct {
-	Protocol TransProto
-	SrcAddr  net.IP
-	SrcPort  uint16
-	DstAddr  net.IP
-	DstPort  uint16
+	Proto   TransProto
+	SrcIP   net.IP
+	SrcPort int
+	DstIP   net.IP
+	DstPort int
+}
+
+func (s *Session) SrcAddr() net.Addr {
+	switch s.Proto {
+	case TCP:
+		return &net.TCPAddr{IP: s.SrcIP, Port: s.SrcPort}
+	case UDP:
+		return &net.UDPAddr{IP: s.SrcIP, Port: s.SrcPort}
+	default:
+		return nil
+	}
+}
+
+func (s *Session) DstAddr() net.Addr {
+	switch s.Proto {
+	case TCP:
+		return &net.TCPAddr{IP: s.DstIP, Port: s.DstPort}
+	case UDP:
+		return &net.UDPAddr{IP: s.DstIP, Port: s.DstPort}
+	default:
+		return nil
+	}
 }
 
 func (s *Session) String() string {
 	buff := bytes.NewBufferString("[")
-	buff.WriteString(s.Protocol.String())
+	buff.WriteString(s.Proto.String())
 	buff.WriteString("] ")
-	buff.WriteString(s.SrcAddr.String())
+	buff.WriteString(s.SrcIP.String())
 	buff.WriteRune(':')
 	buff.WriteString(strconv.Itoa(int(s.SrcPort)))
 	buff.WriteString(" -> ")
-	buff.WriteString(s.DstAddr.String())
+	buff.WriteString(s.DstIP.String())
 	buff.WriteRune(':')
 	buff.WriteString(strconv.Itoa(int(s.DstPort)))
 
@@ -446,11 +468,11 @@ func (seg *TCPSegment) Flow() *Session {
 	ih := seg.preLayer
 
 	return &Session{
-		Protocol: TCP,
-		SrcAddr:  net.IP(ih.SrcAddr[:]),
-		SrcPort:  seg.SrcPort,
-		DstAddr:  net.IP(ih.DstAddr[:]),
-		DstPort:  seg.DstPort,
+		Proto:   TCP,
+		SrcIP:   net.IP(ih.SrcAddr[:]),
+		SrcPort: int(seg.SrcPort),
+		DstIP:   net.IP(ih.DstAddr[:]),
+		DstPort: int(seg.DstPort),
 	}
 }
 
@@ -491,11 +513,11 @@ func (seg *UDPSegment) Flow() *Session {
 	ih := seg.preLayer
 
 	return &Session{
-		Protocol: UDP,
-		SrcAddr:  net.IP(ih.SrcAddr[:]),
-		SrcPort:  seg.SrcPort,
-		DstAddr:  net.IP(ih.DstAddr[:]),
-		DstPort:  seg.DstPort,
+		Proto:   UDP,
+		SrcIP:   net.IP(ih.SrcAddr[:]),
+		SrcPort: int(seg.SrcPort),
+		DstIP:   net.IP(ih.DstAddr[:]),
+		DstPort: int(seg.DstPort),
 	}
 }
 

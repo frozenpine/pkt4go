@@ -13,11 +13,11 @@ func TestSession(t *testing.T) {
 	copy(dst[:], net.ParseIP("192.168.1.2").To4())
 
 	session := pkt4go.Session{
-		Protocol: pkt4go.TCP,
-		SrcAddr:  net.IP(src[:]),
-		SrcPort:  1000,
-		DstAddr:  net.IP(dst[:]),
-		DstPort:  2000,
+		Proto:   pkt4go.TCP,
+		SrcIP:   net.IP(src[:]),
+		SrcPort: 1000,
+		DstIP:   net.IP(dst[:]),
+		DstPort: 2000,
 	}
 
 	t.Log(session)

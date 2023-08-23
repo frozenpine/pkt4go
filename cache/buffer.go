@@ -1,10 +1,12 @@
-package pkt4go
+package cache
 
 import (
 	"bytes"
 	"encoding/binary"
 	"io"
 	"math"
+
+	"github.com/frozenpine/pkt4go/utils"
 )
 
 type Buffer struct {
@@ -111,7 +113,7 @@ func (buf *Buffer) ReadCStr(n int) string {
 		panic(err)
 	}
 
-	return CStr2GoStr(p)
+	return utils.CStr2GoStr(p)
 }
 
 func (buf *Buffer) Cap() int {
@@ -142,18 +144,4 @@ func (buf *Buffer) Unread(n int) {
 	}
 
 	buf.Next(offset - n)
-}
-
-func findCStrTerm(in []byte) (idx int) {
-	idx = bytes.IndexByte(in, 0x0)
-
-	if idx < 0 {
-		idx = 0
-	}
-
-	return
-}
-
-func CStr2GoStr(in []byte) string {
-	return string(in[:findCStrTerm(in)])
 }

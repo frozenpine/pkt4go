@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/frozenpine/pkt4go/cache"
 	"github.com/pkg/errors"
 
 	origin_errors "errors"
@@ -106,7 +107,7 @@ type EtherHeader struct {
 }
 
 func (hdr *EtherFrame) Unpack(data []byte) error {
-	buf := NewBuffer(data)
+	buf := cache.NewBuffer(data)
 
 	if buf.Cap() < EtherHeaderSize {
 		return errors.WithStack(ErrInsufficentData)
@@ -174,7 +175,7 @@ type IPv4Header struct {
 }
 
 func (hdr *IPv4Header) Unpack(data []byte) error {
-	buf := NewBuffer(data)
+	buf := cache.NewBuffer(data)
 
 	if buf.Cap() < IPv4HeaderBaseSize {
 		return errors.WithStack(ErrInsufficentData)
@@ -261,7 +262,7 @@ type TCPHeader struct {
 }
 
 func (hdr *TCPHeader) Unpack(data []byte) error {
-	buf := NewBuffer(data)
+	buf := cache.NewBuffer(data)
 
 	if buf.Cap() < TCPHeaderBaseSize {
 		return errors.WithStack(ErrInsufficentData)
@@ -312,7 +313,7 @@ type UDPHeader struct {
 }
 
 func (hdr *UDPHeader) Unpack(data []byte) error {
-	buf := NewBuffer(data)
+	buf := cache.NewBuffer(data)
 
 	if buf.Cap() < UDPHeaderSize {
 		return errors.WithStack(ErrInsufficentData)

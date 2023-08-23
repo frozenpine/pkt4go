@@ -40,13 +40,8 @@ func TestOffset(t *testing.T) {
 	}
 }
 
-func TestAlignUp(t *testing.T) {
-	t.Log(cache.AlignUp(4096))
-	t.Log(cache.AlignUp(-1))
-}
-
 func TestPool(t *testing.T) {
-	pool := cache.NewBytesPool(1500)
+	pool := cache.NewBytesPool(0)
 
 	v1 := pool.GetSlice()
 	t.Log(len(v1), cap(v1), (*reflect.SliceHeader)(unsafe.Pointer(&v1)).Data)

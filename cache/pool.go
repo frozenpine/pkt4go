@@ -4,10 +4,6 @@ import (
 	"sync"
 )
 
-func AlignUp(x int) int {
-	return (x + 1) &^ 1
-}
-
 const MaxBytesSize = 4096
 
 type BytesPool struct {
@@ -16,14 +12,8 @@ type BytesPool struct {
 }
 
 func NewBytesPool(size int) *BytesPool {
-	if size <= 0 {
+	if size <= 0 || size > MaxBytesSize {
 		size = MaxBytesSize
-	} else {
-		size = AlignUp(size)
-
-		if size > MaxBytesSize {
-			size = MaxBytesSize
-		}
 	}
 
 	return &BytesPool{

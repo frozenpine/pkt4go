@@ -1,6 +1,10 @@
 package core
 
-import "github.com/frozenpine/pool"
+import (
+	"log"
+
+	"github.com/frozenpine/pool"
+)
 
 type StreamCache struct {
 	cap    int
@@ -19,6 +23,7 @@ func (cache *StreamCache) Append(buf []byte) int {
 		cache.cap += size * 2
 		newBuffer := make([]byte, cache.cap)
 		copy(newBuffer, cache.buffer[:cache.offset])
+		pool.PutByteSlice(cache.buffer)
 		cache.buffer = newBuffer
 	}
 
@@ -29,14 +34,18 @@ func (cache *StreamCache) Append(buf []byte) int {
 	return cache.offset
 }
 
-func (cache *StreamCache) Merge(buf []byte) []byte {
+func (cache *StreamCache) Merge(data []byte) []byte {
 	if cache.offset <= 0 {
-		return buf
+		return data
 	}
 
-	cache.Append(buf)
+	size := len(data)
+	remain := cache.offset
+	total := remain + size
+	cache.Append(data)
+	log.Printf("Stream buffer[%d] merged[%d] with remain[%d]", total, size, remain)
 	cache.offset = 0
-	return cache.buffer
+	return cache.buffer[:total]
 }
 
 func NewStreamCache() *StreamCache {

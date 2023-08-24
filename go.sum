@@ -1,3 +1,5 @@
+github.com/frozenpine/pool v0.0.2 h1:w009qOOPfanghjvY9BNfEGIlKgEJJqKD4IHGrzKu2UQ=
+github.com/frozenpine/pool v0.0.2/go.mod h1:IBYkFKKRA4M0dmnpmzqongZBX7FvCE5nd6Dch5agFn8=
 github.com/google/gopacket v1.1.19 h1:ves8RnFZPGiFnTS0uPQStjwru6uO6h+nlr9j6fL7kF8=
 github.com/google/gopacket v1.1.19/go.mod h1:iJ8V8n6KS+z2U1A8pUwu8bW5SyEMkXJB8Yo/Vo+TKTo=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=

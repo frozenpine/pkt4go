@@ -1,13 +1,15 @@
-package pkt4go
+package core_test
 
 import (
 	"testing"
+
+	"github.com/frozenpine/pkt4go/core"
 )
 
 func TestOffset(t *testing.T) {
 	data := []byte{0, 1, 2, 3, 4, 5, 6, 7}
 
-	buffer := NewBuffer(data)
+	buffer := core.NewBuffer(data)
 
 	offset := 0
 

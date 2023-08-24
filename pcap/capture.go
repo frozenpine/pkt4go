@@ -8,19 +8,16 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/frozenpine/pkt4go"
+	"github.com/frozenpine/pkt4go/core"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	libpcap "github.com/google/gopacket/pcap"
 	"github.com/pkg/errors"
 )
 
-const (
-	defaultTCPBufferLen = 1024 * 1024
-)
-
 var (
 	dataSourcePattern = regexp.MustCompile(`^(?P<proto>pcap|file)://(?P<source>.*)$`)
+	// sessionCache = map[string]
 )
 
 func CreateHandler(dataSrc string) (handle *libpcap.Handle, err error) {
@@ -74,7 +71,7 @@ func CreateHandler(dataSrc string) (handle *libpcap.Handle, err error) {
 	return
 }
 
-func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, fn pkt4go.DataHandler) (err error) {
+func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, fn core.DataHandler) (err error) {
 	if err := handler.SetBPFFilter(filter); err != nil {
 		return errors.WithStack(err)
 	}
@@ -105,8 +102,9 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 			}
 
 			var (
-				session *pkt4go.Session
+				session *core.Session
 				buffer  []byte
+				cache   *core.StreamCache
 			)
 
 			switch ip.NextLayerType() {
@@ -117,15 +115,16 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 					continue
 				}
 
-				session = &pkt4go.Session{
-					Proto:   pkt4go.TCP,
+				session = &core.Session{
+					Proto:   core.TCP,
 					SrcIP:   ip.SrcIP,
 					SrcPort: int(tcp.SrcPort),
 					DstIP:   ip.DstIP,
 					DstPort: int(tcp.DstPort),
 				}
 
-				buffer = tcp.Payload
+				cache = core.GetStreamCache(session)
+				buffer = cache.Merge(tcp.Payload)
 			case layers.LayerTypeUDP:
 				udp, _ := pkg.Layer(layers.LayerTypeUDP).(*layers.UDP)
 
@@ -133,8 +132,8 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 					continue
 				}
 
-				session = &pkt4go.Session{
-					Proto:   pkt4go.UDP,
+				session = &core.Session{
+					Proto:   core.UDP,
 					SrcIP:   ip.SrcIP,
 					SrcPort: int(udp.SrcPort),
 					DstIP:   ip.DstIP,
@@ -146,15 +145,25 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 				log.Println("unsupported Transport Layer: " + ip.NextLayerType().String())
 			}
 
-			_, err = fn(session, pkg.Metadata().Timestamp, buffer)
+			used, err := fn(session, pkg.Metadata().Timestamp, buffer)
 
 			if err != nil {
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					return nil
 				}
 
 				log.Printf("[%s] %s data handler failed: %v", pkg.Metadata().Timestamp, session, err)
 				return err
+			} else if cache != nil {
+				size := len(buffer)
+
+				if used != size {
+					remain := cache.Append(buffer[used:])
+					log.Printf(
+						"%s handler result: New[%d], Used[%d], Remain[%d]",
+						session, size, used, remain,
+					)
+				}
 			}
 		}
 	}

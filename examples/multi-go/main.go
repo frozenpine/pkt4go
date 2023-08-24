@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/frozenpine/pkt4go"
+	"github.com/frozenpine/pkt4go/core"
 	"github.com/frozenpine/pkt4go/socket"
 )
 
@@ -26,7 +26,7 @@ func init() {
 	log.SetFlags(log.Flags() | log.Lmicroseconds)
 }
 
-func decoder(session *pkt4go.Session, ts time.Time, data []byte) (int, error) {
+func decoder(session *core.Session, ts time.Time, data []byte) (int, error) {
 	var size = len(data)
 	var postFix = ""
 

@@ -11,7 +11,7 @@ import (
 
 func TestCaptureFile(t *testing.T) {
 	source := "file://4tick-level2-A.20230812.pcap"
-	filter := "tcp and net 172.18.32.0/24"
+	filter := "tcp and port 44926"
 
 	handler, err := pcap.CreateHandler(source)
 	if err != nil {
@@ -23,12 +23,17 @@ func TestCaptureFile(t *testing.T) {
 	dataHandler := func(session *core.Session, ts time.Time, data []byte) (int, error) {
 		count += 1
 
+		var used int
+
 		if count%2 == 0 {
-			t.Logf("%s %s: %d", ts, session, len(data))
-			return len(data), nil
+			used = len(data)
+		} else {
+			used = len(data) / 2
 		}
 
-		return len(data) / 2, nil
+		t.Logf("%s %s: %d, %d", ts, session, len(data), used)
+
+		return used, nil
 	}
 
 	if err := pcap.StartCapture(context.TODO(), handler, filter, dataHandler); err != nil {

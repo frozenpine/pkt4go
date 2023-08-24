@@ -160,7 +160,7 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 				if used != size {
 					remain := cache.Append(buffer[used:])
 					log.Printf(
-						"%s stream buffer: New[%d], Used[%d], Remain[%d]",
+						"%s handler result: New[%d], Used[%d], Remain[%d]",
 						session, size, used, remain,
 					)
 				}

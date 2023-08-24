@@ -1,19 +1,19 @@
-package pkt4go_test
+package core_test
 
 import (
 	"net"
 	"testing"
 
-	"github.com/frozenpine/pkt4go"
+	"github.com/frozenpine/pkt4go/core"
 )
 
 func TestSession(t *testing.T) {
-	src, dst := pkt4go.IPv4Addr{}, pkt4go.IPv4Addr{}
+	src, dst := core.IPv4Addr{}, core.IPv4Addr{}
 	copy(src[:], net.ParseIP("192.168.1.1").To4())
 	copy(dst[:], net.ParseIP("192.168.1.2").To4())
 
-	session := pkt4go.Session{
-		Proto:   pkt4go.TCP,
+	session := core.Session{
+		Proto:   core.TCP,
 		SrcIP:   net.IP(src[:]),
 		SrcPort: 1000,
 		DstIP:   net.IP(dst[:]),
@@ -24,9 +24,9 @@ func TestSession(t *testing.T) {
 }
 
 func TestTypePrint(t *testing.T) {
-	ip := pkt4go.ProtoIP
+	ip := core.ProtoIP
 
-	tcp := pkt4go.TCP
+	tcp := core.TCP
 
 	t.Logf("%#04x %#02x", uint16(ip), byte(tcp))
 }

@@ -1,64 +1,17 @@
-package pkt4go
+package core
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"net"
-	"strconv"
 	"sync"
 	"time"
 
-	"github.com/frozenpine/pkt4go/cache"
+	"github.com/frozenpine/pool"
 	"github.com/pkg/errors"
 
 	origin_errors "errors"
 )
-
-type Session struct {
-	Proto   TransProto
-	SrcIP   net.IP
-	SrcPort int
-	DstIP   net.IP
-	DstPort int
-}
-
-func (s *Session) SrcAddr() net.Addr {
-	switch s.Proto {
-	case TCP:
-		return &net.TCPAddr{IP: s.SrcIP, Port: s.SrcPort}
-	case UDP:
-		return &net.UDPAddr{IP: s.SrcIP, Port: s.SrcPort}
-	default:
-		return nil
-	}
-}
-
-func (s *Session) DstAddr() net.Addr {
-	switch s.Proto {
-	case TCP:
-		return &net.TCPAddr{IP: s.DstIP, Port: s.DstPort}
-	case UDP:
-		return &net.UDPAddr{IP: s.DstIP, Port: s.DstPort}
-	default:
-		return nil
-	}
-}
-
-func (s *Session) String() string {
-	buff := bytes.NewBufferString("[")
-	buff.WriteString(s.Proto.String())
-	buff.WriteString("] ")
-	buff.WriteString(s.SrcIP.String())
-	buff.WriteRune(':')
-	buff.WriteString(strconv.Itoa(int(s.SrcPort)))
-	buff.WriteString(" -> ")
-	buff.WriteString(s.DstIP.String())
-	buff.WriteRune(':')
-	buff.WriteString(strconv.Itoa(int(s.DstPort)))
-
-	return buff.String()
-}
 
 // DataHandler transport payload handler
 type DataHandler func(session *Session, ts time.Time, data []byte) (int, error)
@@ -107,7 +60,7 @@ type EtherHeader struct {
 }
 
 func (hdr *EtherFrame) Unpack(data []byte) error {
-	buf := cache.NewBuffer(data)
+	buf := NewBuffer(data)
 
 	if buf.Cap() < EtherHeaderSize {
 		return errors.WithStack(ErrInsufficentData)
@@ -175,7 +128,7 @@ type IPv4Header struct {
 }
 
 func (hdr *IPv4Header) Unpack(data []byte) error {
-	buf := cache.NewBuffer(data)
+	buf := NewBuffer(data)
 
 	if buf.Cap() < IPv4HeaderBaseSize {
 		return errors.WithStack(ErrInsufficentData)
@@ -262,7 +215,7 @@ type TCPHeader struct {
 }
 
 func (hdr *TCPHeader) Unpack(data []byte) error {
-	buf := cache.NewBuffer(data)
+	buf := NewBuffer(data)
 
 	if buf.Cap() < TCPHeaderBaseSize {
 		return errors.WithStack(ErrInsufficentData)
@@ -313,7 +266,7 @@ type UDPHeader struct {
 }
 
 func (hdr *UDPHeader) Unpack(data []byte) error {
-	buf := cache.NewBuffer(data)
+	buf := NewBuffer(data)
 
 	if buf.Cap() < UDPHeaderSize {
 		return errors.WithStack(ErrInsufficentData)
@@ -364,7 +317,7 @@ func (frm *EtherFrame) Release() {
 	frm.nextLayer = nil
 
 	etherFrmPool.Put(frm)
-	payloadPool.Put(frm.Buffer)
+	payloadPool.PutSlice(frm.Buffer)
 
 	if frm.release != nil {
 		frm.release()
@@ -524,11 +477,11 @@ func (seg *UDPSegment) Flow() *Session {
 
 var (
 	mtu          = 1500
-	etherFrmPool = sync.Pool{New: func() any { return &EtherFrame{Buffer: payloadPool.Get().([]byte)} }}
+	etherFrmPool = sync.Pool{New: func() any { return &EtherFrame{Buffer: payloadPool.GetSlice()} }}
 	ipv4PktPool  = sync.Pool{New: func() any { return &IPv4Packet{} }}
 	tcpSegPool   = sync.Pool{New: func() any { return &TCPSegment{} }}
 	udpSegPool   = sync.Pool{New: func() any { return &UDPSegment{} }}
-	payloadPool  = sync.Pool{New: func() any { return make([]byte, mtu) }}
+	payloadPool  = pool.NewBytesPool(mtu)
 )
 
 // SetMTU 设置MTU大小, 以确保整个以太帧能放入数据缓存
@@ -547,7 +500,7 @@ func CreateEmptyEtherFrame() *EtherFrame {
 func CreateEtherFrame(buffer []byte, ts time.Time) *EtherFrame {
 	frm := CreateEmptyEtherFrame()
 	frm.Timestamp = ts
-	payloadPool.Put(frm.Buffer)
+	payloadPool.PutSlice(frm.Buffer)
 	frm.Buffer = buffer
 
 	return frm

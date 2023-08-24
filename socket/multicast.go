@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/frozenpine/pkt4go"
+	"github.com/frozenpine/pkt4go/core"
 )
 
 const defaultBufferLen = 4096
@@ -57,7 +57,7 @@ FIND:
 }
 
 // ServeMultiCast join multicast group
-func ServeMultiCast(ctx context.Context, listen, bind string, buffSize int, handler pkt4go.DataHandler) error {
+func ServeMultiCast(ctx context.Context, listen, bind string, buffSize int, handler core.DataHandler) error {
 	if handler == nil {
 		return errors.New("data handler can not be nil")
 	}
@@ -107,8 +107,8 @@ func ServeMultiCast(ctx context.Context, listen, bind string, buffSize int, hand
 				return err
 			}
 
-			session := pkt4go.Session{
-				Proto:   pkt4go.UDP,
+			session := core.Session{
+				Proto:   core.UDP,
 				SrcIP:   src.IP,
 				SrcPort: src.Port,
 				DstIP:   listenAddr.IP,

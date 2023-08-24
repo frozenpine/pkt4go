@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/frozenpine/pkt4go"
+	"github.com/frozenpine/pkt4go/core"
 	"github.com/frozenpine/pkt4go/pcap"
 )
 
@@ -18,7 +18,7 @@ func TestCaptureFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dataHandler := func(session *pkt4go.Session, ts time.Time, data []byte) (int, error) {
+	dataHandler := func(session *core.Session, ts time.Time, data []byte) (int, error) {
 		t.Logf("%s %s: %d", ts, session, len(data))
 		return len(data), nil
 	}

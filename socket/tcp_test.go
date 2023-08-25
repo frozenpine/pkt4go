@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,10 +21,15 @@ func TestDialTCP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	run := atomic.Bool{}
+	run.Store(true)
+	defer func() {
+		run.Store(false)
+		l.Close()
+	}()
 
 	go func() {
-		for {
+		for run.Load() {
 			select {
 			case <-ctx.Done():
 				return

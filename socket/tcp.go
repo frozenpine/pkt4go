@@ -38,18 +38,6 @@ func DialTCP(ctx context.Context, front string, buffSize int, handler core.DataH
 	}
 	defer conn.Close()
 
-	// raw, err := conn.SyscallConn()
-	// if err != nil {
-	// 	return err
-	// }
-
-	// raw.Control(func(fd uintptr) {
-	// 	err = syscall.SetNonblock(syscall.Handle(fd), true)
-	// })
-	// if err != nil {
-	// 	return err
-	// }
-
 	if buffSize <= 0 {
 		buffSize = defaultBuffSize
 	}
@@ -78,19 +66,7 @@ func DialTCP(ctx context.Context, front string, buffSize int, handler core.DataH
 		case <-ctx.Done():
 			return nil
 		default:
-			var (
-				n   int
-				err error
-			)
-			// raw.Read(func(fd uintptr) (done bool) {
-			// 	n, err = syscall.Read(syscall.Handle(fd), buff)
-			// 	return true
-			// })
-
-			// if n == 0 {
-			// 	continue
-			// }
-			n, err = conn.Read(buff)
+			n, err := conn.Read(buff)
 			ts := time.Now()
 
 			if err != nil {

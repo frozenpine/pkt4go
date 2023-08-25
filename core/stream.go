@@ -2,8 +2,10 @@ package core
 
 import (
 	"log"
+	"strconv"
 
 	"github.com/frozenpine/pool"
+	"github.com/valyala/bytebufferpool"
 )
 
 type StreamCache struct {
@@ -55,16 +57,30 @@ func NewStreamCache() *StreamCache {
 	}
 }
 
-var defaultStreamCaches = map[string]*StreamCache{}
+var (
+	defaultStreamCaches = map[string]*StreamCache{}
+)
+
+func makeSessionKey(session *Session) string {
+	buff := bytebufferpool.Get()
+	defer bytebufferpool.Put(buff)
+
+	buff.WriteString(session.Proto.String())
+	buff.WriteString(session.SrcIP.String())
+	buff.WriteString(strconv.Itoa(session.SrcPort))
+	buff.WriteString(session.DstIP.String())
+	buff.WriteString(strconv.Itoa(session.DstPort))
+
+	return buff.String()
+}
 
 func GetStreamCache(session *Session) *StreamCache {
-	s := session.String()
+	key := makeSessionKey(session)
 
-	cache, exist := defaultStreamCaches[s]
-
+	cache, exist := defaultStreamCaches[key]
 	if !exist {
 		cache = NewStreamCache()
-		defaultStreamCaches[s] = cache
+		defaultStreamCaches[key] = cache
 	}
 
 	return cache

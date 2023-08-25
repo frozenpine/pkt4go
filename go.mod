@@ -9,6 +9,7 @@ require (
 )
 
 require (
+	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/sys v0.5.0 // indirect
 )

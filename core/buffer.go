@@ -97,6 +97,20 @@ func (buf *Buffer) ReadHDouble() float64 {
 	return result
 }
 
+func (buf *Buffer) ReadNSingle() float32 {
+	bits := binary.BigEndian.Uint32(buf.origin.Next(4))
+	result := math.Float32frombits(bits)
+
+	return result
+}
+
+func (buf *Buffer) ReadHSingle() float32 {
+	bits := binary.LittleEndian.Uint32(buf.origin.Next(4))
+	result := math.Float32frombits(bits)
+
+	return result
+}
+
 func (buf *Buffer) Read(p []byte) (n int, err error) {
 	n, err = buf.origin.Read(p)
 

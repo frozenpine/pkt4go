@@ -13,17 +13,17 @@ func TestOffset(t *testing.T) {
 
 	offset := 0
 
-	buffer.ReadByte()
+	t.Log(buffer.ReadUint8())
 	if offset = buffer.Offset(); offset != 1 {
 		t.Fatal("Read byte failed.")
 	}
 
-	buffer.ReadHShort()
+	t.Log(buffer.ReadHShort())
 	if offset = buffer.Offset(); offset != 3 {
 		t.Fatal("Read short failed")
 	}
 
-	buffer.ReadNLong()
+	t.Log(buffer.ReadNLong())
 	if offset = buffer.Offset(); offset != 7 {
 		t.Fatal("Read long failed")
 	}

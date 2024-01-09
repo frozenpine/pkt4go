@@ -72,8 +72,10 @@ func CreateHandler(dataSrc string) (handle *libpcap.Handle, err error) {
 }
 
 func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, fn core.DataHandler) (err error) {
-	if err := handler.SetBPFFilter(filter); err != nil {
-		return errors.WithStack(err)
+	if filter != "" {
+		if err := handler.SetBPFFilter(filter); err != nil {
+			return errors.WithStack(err)
+		}
 	}
 
 	if ctx == nil {

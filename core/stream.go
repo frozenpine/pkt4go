@@ -70,7 +70,7 @@ func (cache *StreamCache) Merge(data []byte) []byte {
 func NewStreamCache() *StreamCache {
 	return &StreamCache{
 		cap:    pool.MaxBytesSize,
-		buffer: pool.GetByteSlice(),
+		buffer: make([]byte, pool.MaxBytesSize),
 	}
 }
 

@@ -27,7 +27,7 @@ func (cache *StreamCache) append(data []byte) {
 		newBuffer := make([]byte, cache.cap)
 		copy(newBuffer, cache.buffer[cache.used:cache.offset])
 		cache.offset -= cache.used
-		pool.PutByteSlice(cache.buffer)
+		cache.used = 0
 		cache.buffer = newBuffer
 	}
 

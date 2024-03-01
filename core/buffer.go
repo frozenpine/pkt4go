@@ -24,7 +24,7 @@ func NewBuffer(data []byte) *Buffer {
 }
 
 func (buf *Buffer) Offset() int {
-	return buf.Cap() - buf.Len()
+	return len(buf.data) - buf.Len()
 }
 
 func (buf *Buffer) ReadByte() (byte, error) {

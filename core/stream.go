@@ -44,6 +44,11 @@ func (cache *StreamCache) Rotate(used int, data []byte) {
 		cache.used += used
 	}
 
+	if cache.used == cache.offset {
+		cache.used = 0
+		cache.offset = 0
+	}
+
 	cache.append(data)
 }
 

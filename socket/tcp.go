@@ -90,19 +90,12 @@ func DialTCP(ctx context.Context, front string, buffSize int, handler core.DataH
 					ts, &session, err)
 			}
 
-			size := len(buff)
-
 			if used < 0 {
 				log.Printf("handler return size invalid: %d", used)
 				continue
 			}
 
-			if remain := cache.Append(buff[used:]); remain > 0 {
-				log.Printf(
-					"%s handler result: New[%d], Used[%d], Remain[%d]",
-					&session, size, used, remain,
-				)
-			}
+			cache.Rotate(used, buff[used:])
 		}
 	}
 }

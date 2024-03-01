@@ -157,15 +157,7 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 				log.Printf("[%s] %s data handler failed: %v", pkg.Metadata().Timestamp, session, err)
 				return err
 			} else if cache != nil {
-				size := len(buffer)
-
-				if used != size {
-					remain := cache.Append(buffer[used:])
-					log.Printf(
-						"%s handler result: New[%d], Used[%d], Remain[%d]",
-						session, size, used, remain,
-					)
-				}
+				cache.Rotate(used, buffer[used:])
 			}
 		}
 	}

@@ -11,43 +11,60 @@ import (
 type StreamCache struct {
 	cap    int
 	offset int
+	used   int
 	buffer []byte
 }
 
-func (cache *StreamCache) Append(buf []byte) int {
-	size := len(buf)
+func (cache *StreamCache) append(data []byte) {
+	size := len(data)
 
 	if size <= 0 {
-		return 0
+		return
 	}
 
 	if cache.offset+size > cache.cap {
 		cache.cap += size * 2
 		newBuffer := make([]byte, cache.cap)
-		copy(newBuffer, cache.buffer[:cache.offset])
+		copy(newBuffer, cache.buffer[cache.used:cache.offset])
+		cache.offset -= cache.used
 		pool.PutByteSlice(cache.buffer)
 		cache.buffer = newBuffer
 	}
 
-	copy(cache.buffer[cache.offset:], buf)
-
+	copy(cache.buffer[cache.offset:], data)
 	cache.offset += size
-
-	return cache.offset
 }
 
+// Rotate 滚动已使用数据
+func (cache *StreamCache) Rotate(used int, data []byte) {
+	if used > cache.offset-cache.used {
+		cache.used = 0
+		cache.offset = 0
+	} else {
+		cache.used += used
+	}
+
+	cache.append(data)
+}
+
+func (cache *StreamCache) Bytes() []byte {
+	return cache.buffer[cache.used:cache.offset]
+}
+
+// Merge 合并数据至已有缓存
 func (cache *StreamCache) Merge(data []byte) []byte {
 	if cache.offset <= 0 {
-		return data
+		cache.offset = 0
+		cache.used = 0
 	}
 
 	size := len(data)
-	remain := cache.offset
-	total := remain + size
-	cache.Append(data)
-	log.Printf("Stream buffer[%d] merged[%d] with remain[%d]", total, size, remain)
-	cache.offset = 0
-	return cache.buffer[:total]
+	remain := cache.offset - cache.used
+	cache.append(data)
+	log.Printf("Stream buffer[%d] merged[%d] with remain[%d]",
+		cache.offset, size, remain)
+
+	return cache.Bytes()
 }
 
 func NewStreamCache() *StreamCache {

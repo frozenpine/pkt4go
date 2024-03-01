@@ -95,7 +95,7 @@ func DialTCP(ctx context.Context, front string, buffSize int, handler core.DataH
 				continue
 			}
 
-			cache.Rotate(used, buff[used:])
+			cache.Rotate(used, nil)
 		}
 	}
 }

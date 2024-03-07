@@ -95,6 +95,12 @@ func ServeMultiCast(ctx context.Context, listen, bind string, buffSize int, hand
 
 	defer lsnr.Close()
 
+	session := core.Session{
+		Proto:   core.UDP,
+		DstIP:   listenAddr.IP,
+		DstPort: listenAddr.Port,
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -107,13 +113,8 @@ func ServeMultiCast(ctx context.Context, listen, bind string, buffSize int, hand
 				return err
 			}
 
-			session := core.Session{
-				Proto:   core.UDP,
-				SrcIP:   src.IP,
-				SrcPort: src.Port,
-				DstIP:   listenAddr.IP,
-				DstPort: listenAddr.Port,
-			}
+			session.SrcIP = src.IP
+			session.SrcPort = src.Port
 
 			if _, err := handler(&session, ts, buffer[:n]); err != nil {
 				if e, ok := err.(HandlerError); !ok || !e.IsRecoverable() {

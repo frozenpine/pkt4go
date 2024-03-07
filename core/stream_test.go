@@ -30,10 +30,11 @@ func TestStreamCache(t *testing.T) {
 		t.Fatal("initial merge failed")
 	}
 
-	cache.Rotate(1, data[1:])
+	rotate := 1
+	cache.Rotate(rotate, nil)
 
 	buff = cache.Merge(data)
-	if len(buff) != (len(data)-1)*2+len(data) {
+	if slices.Compare(buff, append(data[rotate:], data...)) != 0 {
 		t.Fatal("remain merge failed")
 	}
 

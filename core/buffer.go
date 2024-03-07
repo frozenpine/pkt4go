@@ -23,10 +23,6 @@ func NewBuffer(data []byte) *Buffer {
 	return &buffer
 }
 
-func (buf *Buffer) Offset() int {
-	return len(buf.data) - buf.Len()
-}
-
 func (buf *Buffer) ReadByte() (byte, error) {
 	return buf.origin.ReadByte()
 }
@@ -128,6 +124,10 @@ func (buf *Buffer) ReadCStr(n int) string {
 	}
 
 	return utils.CStr2GoStr(p)
+}
+
+func (buf *Buffer) Offset() int {
+	return len(buf.data) - buf.origin.Len()
 }
 
 func (buf *Buffer) Cap() int {

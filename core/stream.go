@@ -25,7 +25,7 @@ func (cache *StreamCache) append(data []byte) {
 	if cache.offset+size > cache.cap {
 		cache.cap += size * 2
 		newBuffer := make([]byte, cache.cap)
-		copy(newBuffer, cache.buffer[cache.used:cache.offset])
+		copy(newBuffer, cache.Bytes())
 		cache.offset -= cache.used
 		cache.used = 0
 		cache.buffer = newBuffer
@@ -56,9 +56,17 @@ func (cache *StreamCache) Bytes() []byte {
 	return cache.buffer[cache.used:cache.offset]
 }
 
+func (cache *StreamCache) Len() int {
+	return cache.offset - cache.used
+}
+
 // Merge 合并数据至已有缓存
 func (cache *StreamCache) Merge(data []byte) []byte {
-	if cache.offset <= 0 {
+	if len(data) <= 0 {
+		return cache.Bytes()
+	}
+
+	if cache.offset <= 0 || cache.used >= cache.offset {
 		cache.offset = 0
 		cache.used = 0
 	}
@@ -67,7 +75,7 @@ func (cache *StreamCache) Merge(data []byte) []byte {
 	remain := cache.offset - cache.used
 	cache.append(data)
 	log.Printf("Stream buffer[%d] merged[%d] with remain[%d]",
-		cache.offset, size, remain)
+		cache.Len(), size, remain)
 
 	return cache.Bytes()
 }

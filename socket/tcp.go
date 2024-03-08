@@ -1,6 +1,7 @@
 package socket
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -42,6 +43,8 @@ func DialTCP(ctx context.Context, front string, buffSize int, handler core.DataH
 		buffSize = defaultBuffSize
 	}
 
+	conn.SetReadBuffer(buffSize)
+
 	local := strings.Split(conn.LocalAddr().String(), ":")
 	localIP := net.ParseIP(strings.Trim(local[0], "[]"))
 	localPort, _ := strconv.Atoi(local[1])
@@ -60,13 +63,14 @@ func DialTCP(ctx context.Context, front string, buffSize int, handler core.DataH
 	}
 
 	buff := make([]byte, buffSize)
+	connRd := bufio.NewReader(conn)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		default:
-			n, err := conn.Read(buff)
+			n, err := connRd.Read(buff)
 			ts := time.Now()
 
 			if err != nil {

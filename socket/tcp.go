@@ -81,8 +81,8 @@ func DialTCP(ctx context.Context, front string, buffSize int, handler core.DataH
 				return err
 			}
 
-			buff = cache.Merge(buff[:n])
-			used, err := handler(&session, ts, buff)
+			cached := cache.Merge(buff[:n])
+			used, err := handler(&session, ts, cached)
 
 			if err != nil {
 				if errors.Is(err, io.EOF) {
@@ -96,8 +96,8 @@ func DialTCP(ctx context.Context, front string, buffSize int, handler core.DataH
 
 			switch {
 			case used < 0:
-				log.Printf("handler return size invalid: %d", used)
-				cache.Rotate(len(buff), nil)
+				log.Printf("handler return size[%d] invalid, rotate all cache: %d", used, len(cached))
+				cache.Rotate(len(cached), nil)
 			case used == 0:
 			case used > 0:
 				cache.Rotate(used, nil)

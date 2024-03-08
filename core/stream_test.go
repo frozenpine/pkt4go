@@ -43,4 +43,9 @@ func TestStreamCache(t *testing.T) {
 	if slices.Compare(cache.Bytes(), data) != 0 {
 		t.Fatal("exceed rotate failed")
 	}
+
+	result := cache.Merge(make([]byte, 4096))
+	if slices.Compare(result, append(data, make([]byte, 4096)...)) != 0 {
+		t.Fatal("extend failed")
+	}
 }

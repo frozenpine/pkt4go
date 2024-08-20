@@ -139,6 +139,10 @@ func (buf *Buffer) Len() int {
 }
 
 func (buf *Buffer) Next(n int) []byte {
+	if n <= 0 {
+		return nil
+	}
+
 	v := buf.origin.Next(n)
 
 	return v

@@ -3,7 +3,7 @@ package pcap
 import (
 	"context"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"regexp"
 	"time"
@@ -99,7 +99,7 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 
 			ip := pkg.Layer(layers.LayerTypeIPv4).(*layers.IPv4)
 			if ip == nil {
-				log.Printf("%+v", errors.New("captured packet is not a valid IPv4 packet"))
+				slog.Error("captured is not a valid IPv4 packet.")
 				continue
 			}
 
@@ -144,7 +144,10 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 
 				buffer = udp.Payload
 			default:
-				log.Println("unsupported Transport Layer: " + ip.NextLayerType().String())
+				slog.Error(
+					"unsupported transport layer:",
+					slog.String("layer", ip.NextLayerType().String()),
+				)
 			}
 
 			used, err := fn(session, pkg.Metadata().Timestamp, buffer)
@@ -154,7 +157,6 @@ func StartCapture(ctx context.Context, handler *libpcap.Handle, filter string, f
 					return nil
 				}
 
-				log.Printf("[%s] %s data handler failed: %v", pkg.Metadata().Timestamp, session, err)
 				return err
 			} else if cache != nil {
 				cache.Rotate(used, nil)

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"log/slog"
 	"net"
 	"slices"
 	"testing"
@@ -15,12 +16,14 @@ func TestSessionKey(t *testing.T) {
 		DstPort: 4321,
 	}
 
-	key := makeSessionKey(&s)
+	key := s.String()
 
 	t.Log(len(key), key)
 }
 
 func TestStreamCache(t *testing.T) {
+	slog.SetLogLoggerLevel(slog.LevelDebug)
+
 	cache := NewStreamCache()
 
 	data := []byte{1, 2, 3}

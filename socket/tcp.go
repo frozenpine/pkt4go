@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"strconv"
 	"strings"
@@ -96,7 +96,11 @@ func DialTCP(ctx context.Context, front string, buffSize int, handler core.DataH
 
 			switch {
 			case used < 0:
-				log.Printf("handler return size[%d] invalid, rotate all cache: %d", used, len(cached))
+				slog.Warn(
+					"handler return size invalid, rotate all cache:",
+					slog.Int("used", used),
+					slog.Int("cache", len(cached)),
+				)
 				cache.Rotate(len(cached), nil)
 			case used == 0:
 			case used > 0:

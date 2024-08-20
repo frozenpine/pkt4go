@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"strings"
 	"time"
@@ -21,7 +21,10 @@ func ParseBindInterface(bind string) (iface *net.Interface) {
 
 	localInterfaces, err := net.Interfaces()
 	if err != nil {
-		log.Printf("Find local interface failed: %+v", err)
+		slog.Error(
+			"finding local INT failed:",
+			slog.Any("error", err),
+		)
 		return
 	}
 
@@ -50,7 +53,11 @@ FIND:
 	}
 
 	if iface != nil {
-		log.Printf("Bind interface[%s] found: %s\n", iface.Name, iface.HardwareAddr.String())
+		slog.Info(
+			"bind INT found:",
+			slog.String("iface", iface.Name),
+			slog.String("mac", iface.HardwareAddr.String()),
+		)
 	}
 
 	return
@@ -89,7 +96,10 @@ func ServeMultiCast(ctx context.Context, listen, bind string, buffSize int, hand
 		return err
 	}
 
-	log.Printf("Joined multicast group: %s\n", listenAddr.String())
+	slog.Info(
+		"joined multicast group:",
+		slog.String("addr", listenAddr.String()),
+	)
 
 	buffer := make([]byte, buffSize)
 
@@ -121,7 +131,10 @@ func ServeMultiCast(ctx context.Context, listen, bind string, buffSize int, hand
 					return err
 				}
 
-				log.Println(err)
+				slog.Warn(
+					"multicast data handle failed:",
+					slog.Any("error", err),
+				)
 			}
 		}
 	}

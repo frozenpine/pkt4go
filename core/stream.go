@@ -1,11 +1,9 @@
 package core
 
 import (
-	"log"
-	"strconv"
+	"log/slog"
 
 	"github.com/frozenpine/pool"
-	"github.com/valyala/bytebufferpool"
 )
 
 type StreamCache struct {
@@ -15,14 +13,17 @@ type StreamCache struct {
 	buffer []byte
 }
 
+// Free 返回底层缓冲区的可用
 func (cache *StreamCache) Free() int {
 	return cache.cap - cache.offset
 }
 
+// Len 剩余未使用数据长度
 func (cache *StreamCache) Len() int {
 	return cache.offset - cache.used
 }
 
+// Cap 返回底层缓冲区的cap
 func (cache *StreamCache) Cap() int {
 	return cache.cap
 }
@@ -35,13 +36,23 @@ func (cache *StreamCache) append(data []byte) {
 	}
 
 	if size > cache.Free() {
-		len := cache.Len()
-		total := size + len
-
-		if total <= cache.cap && len <= cache.used {
-			log.Printf(
-				"Moving existing buffer[%d:%d] with cap[%d] for free space %d",
-				cache.used, cache.offset, cache.cap, size)
+		if len := cache.Len(); size+len <= cache.cap && len <= cache.used {
+			slog.Debug(
+				"moving buffer forward for extra data:",
+				slog.Group(
+					"before",
+					slog.Int("used", cache.used),
+					slog.Int("offset", cache.offset),
+					slog.Int("cap", cache.cap),
+				),
+				slog.Int("data", size),
+				slog.Group(
+					"after",
+					slog.Int("used", 0),
+					slog.Int("offset", len),
+					slog.Int("cap", cache.cap),
+				),
+			)
 
 			copy(cache.buffer, cache.Bytes())
 			cache.used = 0
@@ -53,11 +64,22 @@ func (cache *StreamCache) append(data []byte) {
 			} else {
 				newCap = cache.cap + size
 			}
-			log.Printf(
-				"No sufficent space[%d:%d:%d]"+
-					" for data[%d], creating new[%d]",
-				cache.used, cache.offset, cache.cap,
-				size, newCap,
+			slog.Debug(
+				"no sufficent space for new data, make new:",
+				slog.Group(
+					"before",
+					slog.Int("used", cache.used),
+					slog.Int("offset", cache.offset),
+					slog.Int("cap", cache.cap),
+				),
+				slog.Int("data", size),
+				slog.Int("new_cap", newCap),
+				slog.Group(
+					"after",
+					slog.Int("used", 0),
+					slog.Int("offset", cache.offset-cache.used),
+					slog.Int("cap", newCap),
+				),
 			)
 
 			newBuffer := make([]byte, newCap)
@@ -75,27 +97,50 @@ func (cache *StreamCache) append(data []byte) {
 
 // Rotate 滚动已使用数据
 func (cache *StreamCache) Rotate(used int, data []byte) {
-	if used > cache.offset-cache.used {
-		log.Printf(
-			"Rotate len[%d] exceeded, discarding exist buffer[%d:%d]",
-			used, cache.used, cache.offset,
+	if used >= cache.Len() {
+		slog.Debug(
+			"all remain buffer rotated:",
+			slog.Group(
+				"before",
+				slog.Int("used", cache.used),
+				slog.Int("offset", cache.offset),
+				slog.Int("cap", cache.cap),
+			),
+			slog.Int("rotate", used),
+			slog.Group(
+				"after",
+				slog.Int("used", 0),
+				slog.Int("offset", 0),
+				slog.Int("cap", cache.cap),
+			),
 		)
-		cache.used = 0
-		cache.offset = 0
-	} else if cache.used+used == cache.offset {
-		log.Printf(
-			"All exist buffer[%d:%d] rotated[%d]",
-			cache.used, cache.offset, used,
-		)
+
 		cache.used = 0
 		cache.offset = 0
 	} else {
+		slog.Debug(
+			"used size rotated:",
+			slog.Group(
+				"before",
+				slog.Int("used", cache.used),
+				slog.Int("offset", cache.offset),
+				slog.Int("cap", cache.cap),
+			),
+			slog.Int("rotate", used),
+			slog.Group(
+				"after",
+				slog.Int("used", cache.used+used),
+				slog.Int("offset", cache.offset),
+				slog.Int("cap", cache.cap),
+			),
+		)
 		cache.used += used
 	}
 
 	cache.append(data)
 }
 
+// Bytes 返回剩余未使用字节数组
 func (cache *StreamCache) Bytes() []byte {
 	return cache.buffer[cache.used:cache.offset]
 }
@@ -111,11 +156,17 @@ func (cache *StreamCache) Merge(data []byte) []byte {
 		cache.used = 0
 	}
 
-	size := len(data)
-	remain := cache.offset - cache.used
 	cache.append(data)
-	log.Printf("Stream buffer[%d] merged[%d] with remain[%d]",
-		cache.Len(), size, remain)
+	slog.Debug(
+		"new data merged:",
+		slog.Group(
+			"cache",
+			slog.Int("used", cache.used),
+			slog.Int("offset", cache.offset),
+			slog.Int("cap", cache.cap),
+		),
+		slog.Int("data", len(data)),
+	)
 
 	return cache.Bytes()
 }
@@ -131,21 +182,8 @@ var (
 	defaultStreamCaches = map[string]*StreamCache{}
 )
 
-func makeSessionKey(session *Session) string {
-	buff := bytebufferpool.Get()
-	defer bytebufferpool.Put(buff)
-
-	buff.WriteString(session.Proto.String())
-	buff.WriteString(session.SrcIP.String())
-	buff.WriteString(strconv.Itoa(session.SrcPort))
-	buff.WriteString(session.DstIP.String())
-	buff.WriteString(strconv.Itoa(session.DstPort))
-
-	return buff.String()
-}
-
 func GetStreamCache(session *Session) *StreamCache {
-	key := makeSessionKey(session)
+	key := session.String()
 
 	cache, exist := defaultStreamCaches[key]
 	if !exist {

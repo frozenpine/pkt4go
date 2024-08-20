@@ -1,9 +1,10 @@
 package core
 
 import (
-	"bytes"
 	"net"
 	"strconv"
+
+	"github.com/valyala/bytebufferpool"
 )
 
 type Session struct {
@@ -37,16 +38,19 @@ func (s *Session) DstAddr() net.Addr {
 }
 
 func (s *Session) String() string {
-	buff := bytes.NewBufferString("[")
+	buff := bytebufferpool.Get()
+	defer bytebufferpool.Put(buff)
+
+	buff.WriteByte('[')
 	buff.WriteString(s.Proto.String())
 	buff.WriteString("] ")
 	buff.WriteString(s.SrcIP.String())
-	buff.WriteRune(':')
-	buff.WriteString(strconv.Itoa(int(s.SrcPort)))
+	buff.WriteByte(':')
+	buff.WriteString(strconv.Itoa(s.SrcPort))
 	buff.WriteString(" -> ")
 	buff.WriteString(s.DstIP.String())
-	buff.WriteRune(':')
-	buff.WriteString(strconv.Itoa(int(s.DstPort)))
+	buff.WriteByte(':')
+	buff.WriteString(strconv.Itoa(s.DstPort))
 
 	return buff.String()
 }
